@@ -1,4 +1,9 @@
 const Restaurant = require('../models/restaurant.model');
+const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
+const baseUrl = process.env.BASE_URL;
+
 
 exports.createRestaurant = async (req, res) => {
     try {
@@ -15,8 +20,14 @@ exports.createRestaurant = async (req, res) => {
             });
         }
 
-        const logo = req.files['logo'] ? req.files['logo'][0].filename : null;
-        const images = req.files['images'] ? req.files['images'].map(file => file.filename) : [];
+        const logo = req.files['logo']
+            ? `${req.files['logo'][0].filename}`
+            : null;
+
+        const images = req.files['images']
+            ? req.files['images'].map(file => `${file.filename}`)
+            : [];
+
         const createdBy = req.user?._id;
 
         const newRestaurant = new Restaurant({
@@ -36,11 +47,12 @@ exports.createRestaurant = async (req, res) => {
         return res.status(201).json({
             success: true,
             message: 'Restaurant created successfully',
+            Id: newRestaurant.id,
             data: newRestaurant
         });
 
     } catch (err) {
-        console.error('Error creating restaurants', err);
+        console.error('Error creating restaurant:', err);
         res.status(500).json({
             success: false,
             message: 'Error creating restaurant',
@@ -64,11 +76,19 @@ exports.getRestaurants = async (req, res) => {
             .limit(parseInt(limit))
             .sort({ createdAt: -1 });
 
+        const host = `${req.protocol}://${req.get('host')}`;
+
+        const transformed = restaurants.map((r) => ({
+            ...r._doc,
+            logo: r.logo ? `${host}/uploads/restaurants/logo/${r.logo}` : null,
+            images: r.images?.map(img => `${host}/uploads/restaurants/images/${img}`) || []
+        }));
+
         console.log('Restaurants fetched successfully');
         return res.status(200).json({
             success: true,
             message: 'Restaurants fetched successfully',
-            data: restaurants,
+            data: transformed,
             pagination: {
                 total,
                 page: parseInt(page),
@@ -87,21 +107,39 @@ exports.getRestaurants = async (req, res) => {
 
 exports.getRestaurantById = async (req, res) => {
     try {
-        const restaurant = await Restaurant.findById(req.params.id);
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid restaurant ID'
+            });
+        }
+
+        const restaurant = await Restaurant.findById(id);
         if (!restaurant) {
             return res.status(404).json({
                 success: false,
                 message: 'Restaurant not found'
             });
         }
-        console.log('Restaurants fetched successfully');
+
+        const host = `${req.protocol}://${req.get('host')}`;
+        const transformed = {
+            ...restaurant._doc,
+            logo: restaurant.logo ? `${host}/uploads/restaurants/logo/${restaurant.logo}` : null,
+            images: restaurant.images?.map(img => `${host}/uploads/restaurants/images/${img}`) || []
+        };
+
+        console.log('Restaurant fetched successfully');
         return res.status(200).json({
             success: true,
-            message: 'Restaurants fetched successfully',
-            data: restaurant
+            message: 'Restaurant fetched successfully',
+            data: transformed
         });
+
     } catch (err) {
-        console.log('Error fetching restaurants', err);
+        console.error('Error fetching restaurant', err);
         res.status(500).json({
             success: false,
             message: 'Error fetching restaurant',
@@ -112,12 +150,19 @@ exports.getRestaurantById = async (req, res) => {
 
 exports.updateRestaurant = async (req, res) => {
     try {
+        const restaurant = await Restaurant.findById(req.params.id);
+        if (!restaurant) {
+            return res.status(404).json({
+                success: false,
+                message: 'Restaurant not found'
+            });
+        }
+
         const updateFields = {
-            ...req.body,
-            ...(req.files?.logo && { logo: req.files.logo[0].filename }),
-            ...(req.files?.images && { images: req.files.images.map(f => f.filename) })
+            ...req.body
         };
 
+        // Parse JSON fields
         if (updateFields.openingHours) {
             updateFields.openingHours = JSON.parse(updateFields.openingHours);
         }
@@ -125,24 +170,50 @@ exports.updateRestaurant = async (req, res) => {
             updateFields.cuisine = JSON.parse(updateFields.cuisine);
         }
 
-        const restaurant = await Restaurant.findByIdAndUpdate(req.params.id, updateFields, { new: true });
+        // Handle logo
+        if (req.files?.logo) {
+            const newLogo = req.files.logo[0].filename;
 
-        if (!restaurant) {
-            console.log('Restaurant not found');
-            return res.status(404).json({
-                success: false,
-                message: 'Restaurant not found'
-            });
+            // Delete old logo
+            if (restaurant.logo) {
+                const oldLogoPath = path.join(__dirname, '../uploads/restaurants/logo/', restaurant.logo);
+                if (fs.existsSync(oldLogoPath)) {
+                    fs.unlinkSync(oldLogoPath);
+                }
+            }
+
+            updateFields.logo = newLogo;
         }
+
+        // Handle images
+        if (req.files?.images) {
+            const newImages = req.files.images.map(f => f.filename);
+
+            // Delete old images
+            if (restaurant.images && restaurant.images.length > 0) {
+                restaurant.images.forEach(img => {
+                    const imgPath = path.join(__dirname, '../uploads/restaurants/images/', img);
+                    if (fs.existsSync(imgPath)) {
+                        fs.unlinkSync(imgPath);
+                    }
+                });
+            }
+
+            updateFields.images = newImages;
+        }
+
+        const updatedRestaurant = await Restaurant.findByIdAndUpdate(req.params.id, updateFields, { new: true });
+
         console.log('Restaurant updated successfully');
         return res.status(200).json({
             success: true,
             message: 'Restaurant updated successfully',
-            data: restaurant
+            data: updatedRestaurant
         });
+
     } catch (err) {
-        console.log('Error updating restaurant');
-        res.status(500).json({
+        console.error('Error updating restaurant', err);
+        return res.status(500).json({
             success: false,
             message: 'Error updating restaurant',
             error: err.message
@@ -152,20 +223,47 @@ exports.updateRestaurant = async (req, res) => {
 
 exports.deleteRestaurant = async (req, res) => {
     try {
-        const restaurant = await Restaurant.findByIdAndDelete(req.params.id);
+        const { id } = req.params;
+
+        // Validate ObjectId
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid restaurant ID'
+            });
+        }
+
+        const restaurant = await Restaurant.findByIdAndDelete(id);
+
         if (!restaurant) {
             return res.status(404).json({
                 success: false,
                 message: 'Restaurant not found'
             });
         }
+
+        // Auto-delete logo file if exists
+        if (restaurant.logo) {
+            const logoPath = path.join(__dirname, '../uploads/restaurants/logo/', restaurant.logo);
+            if (fs.existsSync(logoPath)) fs.unlinkSync(logoPath);
+        }
+
+        // Auto-delete image files if exist
+        if (restaurant.images && restaurant.images.length > 0) {
+            restaurant.images.forEach(img => {
+                const imgPath = path.join(__dirname, '../uploads/restaurants/images/', img);
+                if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+            });
+        }
+
         console.log('Restaurant deleted successfully');
         return res.status(200).json({
             success: true,
             message: 'Restaurant deleted successfully'
         });
+
     } catch (err) {
-        console.log('Error deleting restaurant', err);
+        console.error('Error deleting restaurant', err);
         res.status(500).json({
             success: false,
             message: 'Error deleting restaurant',

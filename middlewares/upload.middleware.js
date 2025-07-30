@@ -1,26 +1,58 @@
 const multer = require('multer');
+const fs = require('fs');
 const path = require('path');
 
-// Storage config
+// Multer storage config
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'uploads/'); // Upload folder
+    destination: function (req, file, cb) {
+        let folder = 'uploads/restaurants/others';
+
+        if (file.fieldname === 'logo') {
+            folder = 'uploads/restaurants/logo';
+        } else if (file.fieldname === 'images') {
+            folder = 'uploads/restaurants/images';
+        }
+
+        fs.mkdirSync(folder, { recursive: true });
+        cb(null, folder);
     },
-    filename: (req, file, cb) => {
+    filename: function (req, file, cb) {
         const ext = path.extname(file.originalname);
-        cb(null, `${Date.now()}-${file.fieldname}${ext}`);
-    },
+        const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+        cb(null, uniqueName);
+    }
 });
 
-// File filter – allow all image/* mimetypes
+// File filter to allow only image types
 const fileFilter = (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    const allowedTypes = [
+        'image/jpeg',
+        'image/png',
+        'image/jpg',
+        'image/webp',
+        'image/gif',
+        'image/bmp',
+        'image/svg+xml',
+        'image/avif'
+    ];
+
+    if (allowedTypes.includes(file.mimetype)) {
         cb(null, true);
     } else {
-        cb(new Error('Only image files are allowed'), false);
+        cb(
+            new Error('Only image files (jpeg, png, jpg, webp, gif, bmp, svg) are allowed.'),
+            false
+        );
     }
 };
 
-const upload = multer({ storage, fileFilter });
+// Multer instance
+const upload = multer({
+    storage,
+    fileFilter,
+    limits: {
+        fileSize: 5 * 1024 * 1024 // 5 MB max per file
+    }
+});
 
 module.exports = upload;

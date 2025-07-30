@@ -17,7 +17,7 @@ app.get('/', (req, res) => {
     res.send('Restaurants Reservation APP is Running!');
 });
 
-app.use('/api/users/', userRouter);
+app.use('/api/auth/', userRouter);
 app.use('/api/admin/', adminRouter);
 
 const PORT = process.env.PORT;

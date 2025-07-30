@@ -13,5 +13,14 @@ router.post('/restaurants',
     ]), restaurantValidator, verifyToken, requireRole('admin'), restController.createRestaurant);
 
 router.get('/restaurants', verifyToken, requireRole('admin'), restController.getRestaurants);
+router.get('/restaurants/:id', verifyToken, requireRole('admin'), restController.getRestaurantById);
+
+router.post('/restaurants/:id',
+    upload.fields([
+        { name: 'logo', maxCount: 1 },
+        { name: 'images', maxCount: 5 }
+    ]), restaurantValidator, verifyToken, requireRole('admin'), restController.updateRestaurant);
+
+router.delete('/restaurants/:id', verifyToken, requireRole('admin'), restController.deleteRestaurant);
 
 module.exports = router;
