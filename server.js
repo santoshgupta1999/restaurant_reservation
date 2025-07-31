@@ -1,11 +1,12 @@
 const express = require('express');
-const mongoose = require('./configs/db'); // Import db connection
+const mongoose = require('./configs/db');
 const dotenv = require('dotenv');
 dotenv.config({ quiet: true });
 const cors = require('cors');
 const path = require('path');
 const userRouter = require('./routes/userRoutes');
-const adminRouter = require('./routes/restaurantRoutes');
+const adminRouter = require('./routes/adminRoutes');
+const restRouter = require('./routes/restaurantRoutes');
 
 const app = express();
 app.use(express.json());
@@ -19,6 +20,7 @@ app.get('/', (req, res) => {
 
 app.use('/api/auth/', userRouter);
 app.use('/api/admin/', adminRouter);
+app.use('/api/restaurant', restRouter);
 
 const PORT = process.env.PORT;
 app.listen(PORT, () => console.log(`Server running on port: ${PORT}`));

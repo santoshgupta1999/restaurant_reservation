@@ -1,9 +1,8 @@
-// api/routes/auth.js
-const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/user.model.js");
-
+const path = require('path');
+const fs = require('fs');
 
 // REGISTER
 exports.register = async (req, res) => {
@@ -82,6 +81,80 @@ exports.login = async (req, res) => {
         res.status(500).json({
             success: false,
             error: err.message
+        });
+    }
+};
+
+exports.getProfile = async (req, res) => {
+    try {
+        const user = req.user;
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        console.log('Profile fetched successfully');
+        return res.status(200).json({
+            success: true,
+            message: 'Profile fetched successfully',
+            data: {
+                Id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                imageUrl: `${req.protocol}://${req.get('host')}/uploads/users/${user.profileImage}`
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching profile', err);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching profile',
+            error: err.message
+        });
+    }
+};
+
+
+exports.uploadProfileImage = async (req, res) => {
+    try {
+        const userId = req.user?._id;
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+        if (user.profileImage) {
+            const oldPath = path.join(__dirname, '../uploads/users/', user.profileImage);
+            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        }
+
+        user.profileImage = req.file.filename;
+        await user.save();
+
+        console.log('Profile image updated successfully');
+        return res.status(200).json({
+            success: true,
+            message: 'Profile image updated successfully',
+            data: {
+                Id: user.id,
+                imageUrl: `${req.protocol}://${req.get('host')}/uploads/users/${user.profileImage}`
+            }
+        });
+
+    } catch (error) {
+        console.error('Updating profile image:', error);
+        res.status(500).json({
+            success: false,
+            message: "Error updating profile image",
+            error: error.message
         });
     }
 };

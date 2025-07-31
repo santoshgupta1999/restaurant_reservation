@@ -20,6 +20,10 @@ const UserSchema = new mongoose.Schema(
             enum: ['admin', 'host', 'marketer', 'manager', 'user'], // Allowed values
             default: 'user',
         },
+        profileImage: {
+            type: String,
+            default: null,
+        },
     },
     { timestamps: true }
 );
