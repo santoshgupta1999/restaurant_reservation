@@ -8,7 +8,8 @@ const tableSchema = new mongoose.Schema({
     },
     tableNumber: {
         type: String,
-        required: true
+        required: true,
+        unique: true
     },
     seatCount: {
         type: Number,
