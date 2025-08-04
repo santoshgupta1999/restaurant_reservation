@@ -96,7 +96,6 @@ exports.getProfile = async (req, res) => {
             });
         }
 
-        console.log('Profile fetched successfully');
         return res.status(200).json({
             success: true,
             message: 'Profile fetched successfully',
@@ -120,7 +119,7 @@ exports.getProfile = async (req, res) => {
 };
 
 
-exports.uploadProfileImage = async (req, res) => {
+exports.updateProfile = async (req, res) => {
     try {
         const userId = req.user?._id;
         const user = await User.findById(userId);
@@ -131,31 +130,46 @@ exports.uploadProfileImage = async (req, res) => {
                 message: 'User not found'
             });
         }
-        if (user.profileImage) {
-            const oldPath = path.join(__dirname, '../uploads/users/', user.profileImage);
-            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+
+        if (req.body.name) {
+            user.name = req.body.name;
         }
 
-        user.profileImage = req.file.filename;
+        if (req.body.email) {
+            user.email = req.body.email;
+        }
+
+        if (req.file) {
+            // Delete old image if exists
+            if (user.profileImage) {
+                const oldPath = path.join(__dirname, '../uploads/users/', user.profileImage);
+                if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+            }
+
+            user.profileImage = req.file.filename;
+        }
+
         await user.save();
 
-        console.log('Profile image updated successfully');
         return res.status(200).json({
             success: true,
-            message: 'Profile image updated successfully',
+            message: 'Profile updated successfully',
             data: {
-                Id: user.id,
-                imageUrl: `${req.protocol}://${req.get('host')}/uploads/users/${user.profileImage}`
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                imageUrl: user.profileImage
+                    ? `${req.protocol}://${req.get('host')}/uploads/users/${user.profileImage}`
+                    : null
             }
         });
 
     } catch (error) {
-        console.error('Updating profile image:', error);
+        console.error('Error updating user profile:', error);
         res.status(500).json({
             success: false,
-            message: "Error updating profile image",
+            message: "Error updating user profile",
             error: error.message
         });
     }
 };
-

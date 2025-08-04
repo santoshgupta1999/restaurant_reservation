@@ -14,4 +14,17 @@ router.post('/add',
     reservController.createReservation
 );
 
+router.get('/', verifyToken, requireRole('user'), reservController.getReservation);
+router.get('/:id', verifyToken, requireRole('user'), reservController.getReservationById);
+
+router.post('/update/:id',
+    verifyToken,
+    requireRole('user'),
+    reservationValidator,
+    validate,
+    reservController.updateReservation
+);
+
+router.delete('/:id', verifyToken, validate, reservController.deleteReservation);
+
 module.exports = router;

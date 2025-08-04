@@ -13,7 +13,6 @@ exports.createRestaurant = async (req, res) => {
 
         const existingRestaurant = await Restaurant.findOne({ email });
         if (existingRestaurant) {
-            console.log('Email already exists. Please use another email.');
             return res.status(400).json({
                 success: false,
                 message: 'Email already exists. Please use another email.'
@@ -43,7 +42,6 @@ exports.createRestaurant = async (req, res) => {
         });
 
         await newRestaurant.save();
-        console.log('Restaurant created successfully');
         return res.status(201).json({
             success: true,
             message: 'Restaurant created successfully',
@@ -84,7 +82,6 @@ exports.getRestaurants = async (req, res) => {
             images: r.images?.map(img => `${host}/uploads/restaurants/images/${img}`) || []
         }));
 
-        console.log('Restaurants fetched successfully');
         return res.status(200).json({
             success: true,
             message: 'Restaurants fetched successfully',
@@ -131,7 +128,6 @@ exports.getRestaurantById = async (req, res) => {
             images: restaurant.images?.map(img => `${host}/uploads/restaurants/images/${img}`) || []
         };
 
-        console.log('Restaurant fetched successfully');
         return res.status(200).json({
             success: true,
             message: 'Restaurant fetched successfully',
@@ -204,7 +200,6 @@ exports.updateRestaurant = async (req, res) => {
 
         const updatedRestaurant = await Restaurant.findByIdAndUpdate(req.params.id, updateFields, { new: true });
 
-        console.log('Restaurant updated successfully');
         return res.status(200).json({
             success: true,
             message: 'Restaurant updated successfully',
@@ -256,7 +251,6 @@ exports.deleteRestaurant = async (req, res) => {
             });
         }
 
-        console.log('Restaurant deleted successfully');
         return res.status(200).json({
             success: true,
             message: 'Restaurant deleted successfully'

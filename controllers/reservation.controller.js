@@ -1,6 +1,7 @@
 const Reservation = require('../models/reservation.model');
 const Slot = require('../models/slot.model');
 const Table = require('../models/table.model');
+const mongoose = require('mongoose');
 // const sendSMS = require('../utils/sendSMS'); // <-- optional SMS helper
 // const sendEmail = require('../utils/sendEmail'); // <-- optional Email helper
 
@@ -13,7 +14,15 @@ const getDayOfWeek = (dateString) => {
 exports.createReservation = async (req, res) => {
     try {
         const { restaurantId, tableId, date, slot, guestCount } = req.body;
-        const userId = req.user._id; 
+        const userId = req.user._id;
+
+        const tableExists = await Table.findOne({ _id: tableId, restaurantId });
+        if (!tableExists) {
+            return res.status(404).json({
+                success: false,
+                message: 'Invalid table ID. No such table found for the selected restaurant.'
+            });
+        }
 
         const selectedDay = getDayOfWeek(date);
         console.log('Selected day:', selectedDay);
@@ -83,7 +92,6 @@ exports.createReservation = async (req, res) => {
         //     console.warn('Email failed:', emailErr.message);
         // }
 
-        console.log('Reservation created successfully');
         return res.status(201).json({
             success: true,
             message: 'Reservation created successfully',
@@ -95,6 +103,206 @@ exports.createReservation = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error'
+        });
+    }
+};
+
+exports.getReservation = async (req, res) => {
+    try {
+        const filter = {};
+        if (req.query.restaurantId) filter.restaurantId = req.query.restaurantId;
+        if (req.user.userId) filter.userId = req.user.userId;
+
+        if (!filter.restaurantId) {
+            return res.status(404).json({
+                success: false,
+                message: 'Restaurant ID not found'
+            });
+        }
+
+        const reservations = await Reservation.find(filter)
+            .populate('restaurantId', 'name')
+            .populate('tableId', 'tableNumber capacity')
+            .populate('userId', 'name email');
+
+        return res.status(200).json({
+            success: true,
+            message: 'Reservation fetched successfully',
+            data: reservations
+        });
+
+    } catch (error) {
+        console.error('Error fetching reservation', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching reservation',
+            error: error.message
+        });
+    }
+};
+
+exports.updateReservation = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { restaurantId, tableId, date, slot, guestCount } = req.body;
+
+        const tableExists = await Table.findOne({ _id: tableId, restaurantId });
+        if (!tableExists) {
+            return res.status(404).json({
+                success: false,
+                message: 'Invalid table ID. No such table found for the selected restaurant.'
+            });
+        }
+
+        // Find existing reservation
+        const existing = await Reservation.findById(id);
+        if (!existing) {
+            return res.status(404).json({
+                success: false,
+                message: 'Reservation not found'
+            });
+        }
+
+        // Validate slot only if date or slot changed
+        const isSlotUpdate = (date && date !== existing.date.toISOString()) || slot;
+
+        if (isSlotUpdate && restaurantId && date && slot?.startTime && slot?.endTime) {
+            const selectedDay = getDayOfWeek(date);
+
+            const slotDoc = await Slot.findOne({ restaurantId, day: selectedDay });
+            if (!slotDoc) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'No slot configuration found for this day.'
+                });
+            }
+
+            const isSlotAvailable = slotDoc.slots.some(s =>
+                s.startTime === slot.startTime && s.endTime === slot.endTime
+            );
+
+            if (!isSlotAvailable) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Selected slot is not available.'
+                });
+            }
+
+            // Check for conflict with another reservation
+            const duplicate = await Reservation.findOne({
+                _id: { $ne: id },
+                restaurantId,
+                tableId,
+                date: new Date(date),
+                'slot.startTime': slot.startTime,
+                'slot.endTime': slot.endTime
+            });
+
+            if (duplicate) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'This table is already booked for the selected slot.'
+                });
+            }
+
+            // Set day field for reservation
+            req.body.day = selectedDay;
+        }
+
+        // Perform the update
+        const updated = await Reservation.findByIdAndUpdate(id, req.body, {
+            new: true,
+            runValidators: true
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Reservation updated successfully',
+            data: updated
+        });
+
+    } catch (error) {
+        console.error('Error updating reservation:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+};
+
+
+exports.deleteReservation = async (req, res) => {
+    try {
+        const reservationId = req.params.id;
+        const userId = req.user._id;
+        const userRole = req.user.role;
+
+        const reservation = await Reservation.findById(reservationId);
+
+        if (!reservation) {
+            return res.status(404).json({
+                success: false,
+                message: 'Reservation not found'
+            });
+        }
+
+        // If not admin, allow delete only if reservation belongs to the user
+        if (userRole !== 'admin' && String(reservation.userId) !== String(userId)) {
+            return res.status(403).json({
+                success: false,
+                message: 'You are not authorized to delete this reservation'
+            });
+        }
+
+        await Reservation.findByIdAndDelete(reservationId);
+
+        return res.status(200).json({
+            success: true,
+            message: 'Reservation deleted successfully'
+        });
+    } catch (error) {
+        console.error('Error deleting reservation:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+};
+
+exports.getReservationById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Validate ObjectId format
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid reservation ID format',
+            });
+        }
+
+        // Find the reservation
+        const reservation = await Reservation.findById(id)
+            .populate('userId', 'name email')
+            .populate('restaurantId', 'name')
+            .populate('tableId', 'tableNumber capacity');
+
+        if (!reservation) {
+            return res.status(404).json({
+                success: false,
+                message: 'Reservation not found',
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: reservation,
+        });
+    } catch (error) {
+        console.error('Error fetching reservation:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
         });
     }
 };

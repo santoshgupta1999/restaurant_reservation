@@ -23,10 +23,9 @@ const restaurantSchema = new mongoose.Schema(
             required: true,
         },
         openingHours: {
-            type: Map,
-            of: String,
-            default: {}
-            // Example: { "mon": "9AM-10PM", "tue": "9AM-10PM" }
+            type: String,
+            required: true,
+            match: [/^([1-9]|1[0-2])(AM|PM)-([1-9]|1[0-2])(AM|PM)$/, 'Invalid opening hours format']
         },
         cuisine: {
             type: [String],

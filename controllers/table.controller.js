@@ -22,7 +22,6 @@ exports.createTable = async (req, res) => {
 
         await newTable.save();
 
-        console.log('Table added successfully');
         return res.status(201).json({
             success: true,
             message: 'Table added successfully',
@@ -49,7 +48,6 @@ exports.getTablesByRestaurants = async (req, res) => {
             });
         }
 
-        console.log('Tables Fetched successfully');
         return res.status(200).json({
             success: true,
             message: 'Tables fetched successfully',
@@ -90,14 +88,13 @@ exports.updateTable = async (req, res) => {
             });
         }
 
-        console.log('Table updated successfully');
         return res.status(200).json({
             success: true,
             message: 'Table updated successfully',
         });
 
     } catch (error) {
-        console.log('Error updating tables', error);
+        console.error('Error updating tables', error);
         res.status(500).json({
             success: false,
             message: 'Error updating tables',
@@ -118,7 +115,6 @@ exports.deleteTable = async (req, res) => {
             });
         }
 
-        console.log('Table deleted successfully');
         return res.status(200).json({
             success: true,
             message: 'Table deleted successfully'

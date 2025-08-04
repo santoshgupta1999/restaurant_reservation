@@ -26,7 +26,6 @@ exports.addOrUpdateSlot = async (req, res) => {
             await Slot.create({ restaurantId, day, slots });
             message = "Slots added successfully";
         }
-        console.log(message);
         return res.status(200).json({
             success: true,
             message
@@ -56,7 +55,6 @@ exports.getSlotsByRestaurant = async (req, res) => {
 
         const slots = await Slot.find({ restaurantId });
 
-        console.log('Slots fetched successfully');
         return res.status(200).json({
             success: true,
             message: 'Slots fetched successfully',
@@ -86,7 +84,6 @@ exports.deleteSlot = async (req, res) => {
             });
         }
 
-        console.log('Slots deleted successfully');
         return res.status(200).json({
             success: true,
             message: 'Slots deleted successfully',
