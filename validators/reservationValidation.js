@@ -29,3 +29,10 @@ exports.reservationValidator = [
         .notEmpty().withMessage('Slot end time is required')
         .matches(/^([01]\d|2[0-3]):([0-5]\d)$/).withMessage('Invalid end time format (HH:mm)')
 ];
+
+exports.reservationStatusValidator = [
+    body('status')
+        .notEmpty().withMessage('Status is required')
+        .isIn(['pending', 'confirmed', 'cancelled', 'completed'])
+        .withMessage('Invalid status. Allowed: pending, confirmed, cancelled, completed')
+];

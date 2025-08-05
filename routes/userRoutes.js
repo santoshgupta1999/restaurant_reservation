@@ -14,6 +14,6 @@ const router = express.Router();
 router.post("/signup", registerValidation, handleValidationErrors, register);
 router.post("/login", loginValidation, handleValidationErrors, login);
 router.get('/profile', verifyToken, getProfile);
-router.post('/profile_image', upload.single('profile'), verifyToken, updateProfile);
+router.post('/profile', upload.single('profile'), verifyToken, updateProfile);
 
 module.exports = router;

@@ -147,6 +147,7 @@ exports.getRestaurantById = async (req, res) => {
 exports.updateRestaurant = async (req, res) => {
     try {
         const restaurant = await Restaurant.findById(req.params.id);
+
         if (!restaurant) {
             return res.status(404).json({
                 success: false,
@@ -154,23 +155,36 @@ exports.updateRestaurant = async (req, res) => {
             });
         }
 
-        const updateFields = {
-            ...req.body
-        };
+        const updateFields = { ...req.body };
 
-        // Parse JSON fields
         if (updateFields.openingHours) {
-            updateFields.openingHours = JSON.parse(updateFields.openingHours);
-        }
-        if (updateFields.cuisine) {
-            updateFields.cuisine = JSON.parse(updateFields.cuisine);
+            try {
+                updateFields.openingHours = JSON.parse(updateFields.openingHours);
+            } catch (e) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid JSON in openingHours',
+                    error: e.message
+                });
+            }
         }
 
-        // Handle logo
+        if (updateFields.cuisine) {
+            try {
+                updateFields.cuisine = JSON.parse(updateFields.cuisine);
+            } catch (e) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid JSON in cuisine',
+                    error: e.message
+                });
+            }
+        }
+
         if (req.files?.logo) {
             const newLogo = req.files.logo[0].filename;
 
-            // Delete old logo
+            // Delete old logo if exists
             if (restaurant.logo) {
                 const oldLogoPath = path.join(__dirname, '../uploads/restaurants/logo/', restaurant.logo);
                 if (fs.existsSync(oldLogoPath)) {
@@ -181,24 +195,27 @@ exports.updateRestaurant = async (req, res) => {
             updateFields.logo = newLogo;
         }
 
-        // Handle images
         if (req.files?.images) {
-            const newImages = req.files.images.map(f => f.filename);
+            const newImages = req.files.images.map(file => file.filename);
 
             // Delete old images
             if (restaurant.images && restaurant.images.length > 0) {
-                restaurant.images.forEach(img => {
+                for (const img of restaurant.images) {
                     const imgPath = path.join(__dirname, '../uploads/restaurants/images/', img);
                     if (fs.existsSync(imgPath)) {
                         fs.unlinkSync(imgPath);
                     }
-                });
+                }
             }
 
             updateFields.images = newImages;
         }
 
-        const updatedRestaurant = await Restaurant.findByIdAndUpdate(req.params.id, updateFields, { new: true });
+        const updatedRestaurant = await Restaurant.findByIdAndUpdate(
+            req.params.id,
+            updateFields,
+            { new: true }
+        );
 
         return res.status(200).json({
             success: true,
@@ -207,7 +224,7 @@ exports.updateRestaurant = async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Error updating restaurant', err);
+        console.error('Error updating restaurant:', err);
         return res.status(500).json({
             success: false,
             message: 'Error updating restaurant',

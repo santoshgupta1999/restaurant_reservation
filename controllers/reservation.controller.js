@@ -1,9 +1,11 @@
 const Reservation = require('../models/reservation.model');
 const Slot = require('../models/slot.model');
 const Table = require('../models/table.model');
+const User = require('../models/user.model');
+const Restaurant = require('../models/restaurant.model');
 const mongoose = require('mongoose');
 // const sendSMS = require('../utils/sendSMS'); // <-- optional SMS helper
-// const sendEmail = require('../utils/sendEmail'); // <-- optional Email helper
+const sendEmail = require('../utils/mailer'); // <-- optional Email helper
 
 const getDayOfWeek = (dateString) => {
     const date = new Date(dateString);
@@ -25,7 +27,6 @@ exports.createReservation = async (req, res) => {
         }
 
         const selectedDay = getDayOfWeek(date);
-        console.log('Selected day:', selectedDay);
 
         const slotDoc = await Slot.findOne({ restaurantId, day: selectedDay });
         if (!slotDoc) {
@@ -70,7 +71,7 @@ exports.createReservation = async (req, res) => {
             slot,
             guestCount,
             userId,
-            status: 'confirmed'
+            status: 'pending'
         });
 
         await reservation.save();
@@ -82,15 +83,27 @@ exports.createReservation = async (req, res) => {
         //     console.warn('SMS failed:', smsErr.message);
         // }
 
-        // // Optionally send Email
-        // try {
-        //     await sendEmail(userId, {
-        //         subject: 'Reservation Confirmed',
-        //         text: `Reservation confirmed for ${date} from ${slot.startTime} to ${slot.endTime}.`
-        //     });
-        // } catch (emailErr) {
-        //     console.warn('Email failed:', emailErr.message);
-        // }
+        // Optionally send Email
+        try {
+            const user = await User.findById(userId);
+            const restaurant = await Restaurant.findById(restaurantId);
+
+            if (!user || !restaurant) {
+                console.warn('User or Restaurant not found');
+            } else {
+                await sendEmail(
+                    user.email,
+                    user.name,
+                    'Reservation Confirmed',
+                    restaurant.name,
+                    date,
+                    slot.startTime,
+                    slot.endTime
+                );
+            }
+        } catch (emailErr) {
+            console.warn('Email failed:', emailErr.message);
+        }
 
         return res.status(201).json({
             success: true,
@@ -144,6 +157,7 @@ exports.getReservation = async (req, res) => {
 exports.updateReservation = async (req, res) => {
     try {
         const { id } = req.params;
+        const userId = req.user._id;
         const { restaurantId, tableId, date, slot, guestCount } = req.body;
 
         const tableExists = await Table.findOne({ _id: tableId, restaurantId });
@@ -214,6 +228,27 @@ exports.updateReservation = async (req, res) => {
             new: true,
             runValidators: true
         });
+
+        try {
+            const user = await User.findById(userId);
+            const restaurant = await Restaurant.findById(restaurantId);
+
+            if (!user || !restaurant) {
+                console.warn('User or Restaurant not found');
+            } else {
+                await sendEmail(
+                    user.email,
+                    user.name,
+                    'Reservation updated successfully',
+                    restaurant.name,
+                    date,
+                    slot.startTime,
+                    slot.endTime
+                );
+            }
+        } catch (emailErr) {
+            console.warn('Email failed:', emailErr.message);
+        }
 
         return res.status(200).json({
             success: true,
@@ -303,6 +338,74 @@ exports.getReservationById = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
+        });
+    }
+};
+
+exports.getAllReservationsByAdmin = async (req, res) => {
+    try {
+        const { restaurantId } = req.query;
+
+        const query = {};
+        if (restaurantId) {
+            query.restaurantId = restaurantId;
+        }
+
+        const reservations = await Reservation.find(query)
+            .populate('userId', 'name email')
+            .populate('restaurantId', 'name email phone address')
+            .populate('tableId', 'tableNumber seatCount');
+
+        return res.status(200).json({
+            success: true,
+            message: restaurantId
+                ? 'Reservations fetched for the restaurant successfully'
+                : 'All reservations fetched successfully',
+            count: reservations.length,
+            data: reservations
+        });
+    } catch (error) {
+        console.error('Error fetching reservations:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+exports.updateReservationStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        if (!id || id.length !== 24) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid reservation ID'
+            });
+        }
+
+        const updated = await Reservation.findByIdAndUpdate(id, { status }, { new: true });
+        if (!updated) {
+            return res.status(404).json({
+                success: false,
+                message: 'Reservation not found'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Reservation status updated successfully`,
+            data: updated
+        });
+
+    } catch (error) {
+        console.error('Error updating reservation status:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
         });
     }
 };

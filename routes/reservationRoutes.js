@@ -3,7 +3,7 @@ const router = express.Router();
 
 const reservController = require('../controllers/reservation.controller');
 const { verifyToken, requireRole } = require('../middlewares/auth.middleware');
-const { reservationValidator } = require('../validators/reservationValidation');
+const { reservationValidator, reservationStatusValidator } = require('../validators/reservationValidation');
 const { validate } = require('../middlewares/validationResultHandler');
 
 
@@ -26,5 +26,14 @@ router.post('/update/:id',
 );
 
 router.delete('/:id', verifyToken, validate, reservController.deleteReservation);
+
+router.get('/admin/get', verifyToken, requireRole('admin'), reservController.getAllReservationsByAdmin);
+
+router.post('/status/:id',
+    verifyToken,
+    requireRole('admin'),
+    reservationStatusValidator,
+    reservController.updateReservationStatus
+);
 
 module.exports = router;
