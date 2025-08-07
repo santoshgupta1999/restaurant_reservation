@@ -4,9 +4,12 @@ const router = express.Router();
 const slotController = require('../controllers/slot.controller');
 const tableController = require('../controllers/table.controller');
 const reviewController = require('../controllers/review.controller');
+const dishController = require('../controllers/dish.controller');
 const { verifyToken, requireRole } = require('../middlewares/auth.middleware');
+const upload = require('../middlewares/upload.middleware');
 const { reviewValidator, checkDuplicateReview } = require('../validators/reviewValidation');
 const { validate } = require('../middlewares/validationResultHandler');
+const { dishValidator } = require('../validators/dishValidation');
 
 // ------------------------------------------- Slots ----------------------------------- //
 
@@ -20,6 +23,17 @@ router.post('/table/add', verifyToken, requireRole('admin'), tableController.cre
 router.get('/table/', verifyToken, requireRole('admin'), tableController.getTablesByRestaurants);
 router.post('/table/update/:id', verifyToken, requireRole('admin'), tableController.updateTable);
 router.delete('/table/:id', verifyToken, requireRole('admin'), tableController.deleteTable);
+
+
+// ------------------------------------------- Dish ------------------------------------ //
+
+router.post('/dish/add',
+    verifyToken, requireRole('admin'),
+    upload.array('dishImage', 5),
+    dishValidator, validate,
+    dishController.createDish
+);
+
 
 // ------------------------------------------- Review ---------------------------------- //
 

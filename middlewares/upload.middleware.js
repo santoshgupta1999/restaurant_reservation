@@ -13,6 +13,8 @@ const storage = multer.diskStorage({
             folder = 'uploads/restaurants/images';
         } else if (file.fieldname === 'profile') {
             folder = 'uploads/users';
+        } else if (file.fieldname === 'dishImage') {
+            folder = 'uploads/dishes';
         }
 
         fs.mkdirSync(folder, { recursive: true });
