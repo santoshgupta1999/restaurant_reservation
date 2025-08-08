@@ -34,6 +34,16 @@ router.post('/dish/add',
     dishController.createDish
 );
 
+router.get('/dish/:id', dishController.getDishById);
+router.get('/dish/restaurant/:restaurantId', dishController.getDishesByRestaurantId);
+router.get('/dishes', dishController.getAllDishes);
+
+router.post('/dish/:id', verifyToken, requireRole('admin'),
+    upload.array('images', 5),
+    dishValidator, validate,
+    dishController.updateDishById
+);
+router.delete('/dish/:id', verifyToken, requireRole('admin'), dishController.deleteDishById);
 
 // ------------------------------------------- Review ---------------------------------- //
 
