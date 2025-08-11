@@ -1,4 +1,6 @@
 const Dish = require('../models/dish.model');
+const path = require('path');
+const fs = require('fs');;
 
 
 exports.createDish = async (req, res) => {
@@ -181,7 +183,7 @@ exports.updateDishById = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error updating dish');
+        console.error('Error updating dish', error);
         res.status(500).json({
             success: false,
             message: 'Error updating dish',

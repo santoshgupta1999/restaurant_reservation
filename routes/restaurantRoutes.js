@@ -39,7 +39,7 @@ router.get('/dish/restaurant/:restaurantId', dishController.getDishesByRestauran
 router.get('/dishes', dishController.getAllDishes);
 
 router.post('/dish/:id', verifyToken, requireRole('admin'),
-    upload.array('images', 5),
+    upload.array('dishImage', 5),
     dishValidator, validate,
     dishController.updateDishById
 );
