@@ -57,4 +57,4 @@ router.get('/review', verifyToken, requireRole('user'), reviewController.getRevi
 router.get('/admin/reviews', verifyToken, requireRole('admin'), reviewController.getAllReviewsByAdmin);
 router.get('/avg_rating/:restaurantId', verifyToken, requireRole('admin'), reviewController.getAverageRating);
 
-module.exports = router;
+module.exports = router; 
