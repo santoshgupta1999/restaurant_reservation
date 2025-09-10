@@ -25,7 +25,7 @@ router.post('/table/update/:id', verifyToken, requireRole('admin'), tableControl
 router.delete('/table/:id', verifyToken, requireRole('admin'), tableController.deleteTable);
 
 
-// ------------------------------------------- Dish ------------------------------------ //
+// ------------------------------------------- Dish ----------------------------------- //
 
 router.post('/dish/add',
     verifyToken, requireRole('admin'),
@@ -45,7 +45,7 @@ router.post('/dish/:id', verifyToken, requireRole('admin'),
 );
 router.delete('/dish/:id', verifyToken, requireRole('admin'), dishController.deleteDishById);
 
-// ------------------------------------------- Review ---------------------------------- //
+// ------------------------------------------- Review ----------------------------------- //
 
 router.post('/review',
     verifyToken, requireRole('user'),

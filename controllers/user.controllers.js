@@ -28,7 +28,6 @@ exports.register = async (req, res) => {
         });
 
         await newUser.save();
-        console.log("User register successfully");
         return res.status(201).json({
             success: true,
             message: "User registered successfully",
@@ -67,7 +66,6 @@ exports.login = async (req, res) => {
             process.env.JWT_SECRET,
             { expiresIn: "30d" } // Token valid for 30 day
         );
-        console.log(`${user.role} Login successfully`);
         return res.status(200).json({
             success: true,
             message: `${user.role} Login successfully`,
