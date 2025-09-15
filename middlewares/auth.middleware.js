@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/user.model");
 require('dotenv').config({ quiet: true });
+const BlacklistToken = require("../models/blacklistToken.model");
 
 const verifyToken = async (req, res, next) => {
     const authHeader = req.headers?.authorization;
@@ -13,6 +14,14 @@ const verifyToken = async (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
+
+    const blacklisted = await BlacklistToken.findOne({ token });
+    if (blacklisted) {
+        return res.status(401).json({
+            success: false,
+            message: "You are logged out, please login again"
+        });
+    }
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);

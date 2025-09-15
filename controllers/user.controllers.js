@@ -3,6 +3,8 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/user.model.js");
 const path = require('path');
 const fs = require('fs');
+const BlacklistToken = require("../models/blacklistToken.model");
+
 
 // REGISTER
 exports.register = async (req, res) => {
@@ -167,6 +169,37 @@ exports.updateProfile = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Error updating user profile",
+            error: error.message
+        });
+    }
+};
+
+
+exports.logout = async (req, res) => {
+    try {
+        const authHeader = req.headers?.authorization;
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            return res.status(401).json({
+                success: false,
+                message: "Authorization token missing"
+            });
+        }
+
+        const token = authHeader.split(" ")[1];
+
+        // Save token in blacklist
+        await BlacklistToken.create({ token });
+
+        return res.status(200).json({
+            success: true,
+            message: "Logged out successfully"
+        });
+
+    } catch (error) {
+        console.error("Logout error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error during logout",
             error: error.message
         });
     }

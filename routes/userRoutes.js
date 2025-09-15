@@ -3,7 +3,8 @@ const {
     register,
     login,
     getProfile,
-    updateProfile
+    updateProfile,
+    logout
 } = require("../controllers/user.controllers.js");
 
 const { registerValidation, loginValidation, handleValidationErrors } = require("../validators/userValidation.js");
@@ -15,5 +16,6 @@ router.post("/signup", registerValidation, handleValidationErrors, register);
 router.post("/login", loginValidation, handleValidationErrors, login);
 router.get('/profile', verifyToken, getProfile);
 router.post('/profile', upload.single('profile'), verifyToken, updateProfile);
+router.post('/logout', verifyToken, logout);
 
 module.exports = router;
