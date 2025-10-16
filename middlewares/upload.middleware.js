@@ -36,6 +36,7 @@ const fileFilter = (req, file, cb) => {
         'image/webp',
         'image/gif',
         'image/bmp',
+        'image/jfif',
         'image/svg+xml',
         'image/avif'
     ];
@@ -44,7 +45,7 @@ const fileFilter = (req, file, cb) => {
         cb(null, true);
     } else {
         cb(
-            new Error('Only image files (jpeg, png, jpg, webp, gif, bmp, svg) are allowed.'),
+            new Error('Only image files (jpeg, png, jpg, webp, gif, bmp, jfif, svg) are allowed.'),
             false
         );
     }

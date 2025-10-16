@@ -8,7 +8,7 @@ if (!MONGO_URI) {
 }
 
 mongoose.connect(MONGO_URI)
-    .then(() => console.log('MongoDB Connected to Database'))
+    .then(() => console.log(`Server Connected to MongoDB Database: ${new Date().toLocaleString()}`))
     .catch(err => {
         console.error('MongoDB connection error:', err);
         process.exit(1);

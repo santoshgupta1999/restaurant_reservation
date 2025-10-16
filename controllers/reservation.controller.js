@@ -89,7 +89,11 @@ exports.createReservation = async (req, res) => {
             const restaurant = await Restaurant.findById(restaurantId);
 
             if (!user || !restaurant) {
-                console.warn('User or Restaurant not found');
+                return res.status(404).json({
+                    success: false,
+                    message: 'User or Restaurant not found'
+                });
+
             } else {
                 await sendEmail(
                     user.email,

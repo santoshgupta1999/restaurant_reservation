@@ -6,22 +6,26 @@ const fs = require('fs');
 const BlacklistToken = require("../models/blacklistToken.model");
 
 
-// REGISTER
 exports.register = async (req, res) => {
     try {
         const { name, email, password, role } = req.body;
 
-        // Check if user already exists
         const existingUser = await User.findOne({ email });
         if (existingUser) return res.status(400).json({
             success: false,
             message: "Email already registered"
         });
 
-        // Hash password
+        const allowRoles = ['host', 'marketer', 'manager', 'user']
+        if (!allowRoles.includes(role)) {
+            return res.status(400).json({
+                success: false,
+                message: "Please enter a valid role."
+            })
+        }
+
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Create new user
         const newUser = new User({
             name,
             email,
@@ -136,6 +140,13 @@ exports.updateProfile = async (req, res) => {
         }
 
         if (req.body.email) {
+            const emailExists = await User.findOne({ email: req.body.email, _id: { $ne: userId } });
+            if (emailExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Email already in use by another user"
+                });
+            }
             user.email = req.body.email;
         }
 
