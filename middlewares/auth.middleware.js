@@ -26,7 +26,16 @@ const verifyToken = async (req, res, next) => {
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        const user = await User.findById(decoded.id);
+        const userId = decoded.id || decoded.userId;
+
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid token payload"
+            });
+        }
+
+        const user = await User.findById(userId);
         if (!user) {
             return res.status(401).json({
                 success: false,
@@ -35,6 +44,7 @@ const verifyToken = async (req, res, next) => {
         }
 
         req.user = user;
+        req.token = token;
         next();
     } catch (err) {
         return res.status(403).json({

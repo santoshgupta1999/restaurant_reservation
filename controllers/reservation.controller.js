@@ -18,6 +18,14 @@ exports.createReservation = async (req, res) => {
         const { restaurantId, tableId, date, slot, guestCount } = req.body;
         const userId = req.user._id;
 
+        const restaurantExists = await Restaurant.findById(restaurantId);
+        if (!restaurantExists) {
+            return res.status(404).json({
+                success: false,
+                message: 'Restaurant not found. Please select a valid restaurant.',
+            });
+        }
+
         const tableExists = await Table.findOne({ _id: tableId, restaurantId });
         if (!tableExists) {
             return res.status(404).json({
@@ -71,43 +79,10 @@ exports.createReservation = async (req, res) => {
             slot,
             guestCount,
             userId,
-            status: 'pending'
+            status: 'Pending'
         });
 
         await reservation.save();
-
-        // // Optionally send SMS
-        // try {
-        //     await sendSMS(userId, `Your reservation for ${date} at ${slot.startTime} is confirmed.`);
-        // } catch (smsErr) {
-        //     console.warn('SMS failed:', smsErr.message);
-        // }
-
-        // Optionally send Email
-        try {
-            const user = await User.findById(userId);
-            const restaurant = await Restaurant.findById(restaurantId);
-
-            if (!user || !restaurant) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'User or Restaurant not found'
-                });
-
-            } else {
-                await sendEmail(
-                    user.email,
-                    user.name,
-                    'Reservation Confirmed',
-                    restaurant.name,
-                    date,
-                    slot.startTime,
-                    slot.endTime
-                );
-            }
-        } catch (emailErr) {
-            console.warn('Email failed:', emailErr.message);
-        }
 
         return res.status(201).json({
             success: true,
@@ -348,32 +323,47 @@ exports.getReservationById = async (req, res) => {
 
 exports.getAllReservationsByAdmin = async (req, res) => {
     try {
-        const { restaurantId } = req.query;
+        const { restaurantId, filter } = req.query;
 
         const query = {};
         if (restaurantId) {
             query.restaurantId = restaurantId;
         }
 
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        if (filter === "Upcoming") {
+            query.date = { $gte: today };
+        } else if (filter === "Seated") {
+            query.status = "Seated";
+        }
+
         const reservations = await Reservation.find(query)
-            .populate('userId', 'name email')
-            .populate('restaurantId', 'name email phone address')
-            .populate('tableId', 'tableNumber seatCount');
+            .populate("userId", "name email")
+            .populate("restaurantId", "name email phone address")
+            .populate("tableId", "tableNumber seatCount")
+            .sort({ date: 1 });
 
         return res.status(200).json({
             success: true,
-            message: restaurantId
-                ? 'Reservations fetched for the restaurant successfully'
-                : 'All reservations fetched successfully',
+            message:
+                filter === "Upcoming"
+                    ? "Upcoming reservations fetched successfully"
+                    : filter === "Seated"
+                        ? "Seated reservations fetched successfully"
+                        : restaurantId
+                            ? "All reservations for the restaurant fetched successfully"
+                            : "All reservations fetched successfully",
             count: reservations.length,
-            data: reservations
+            data: reservations,
         });
     } catch (error) {
-        console.error('Error fetching reservations:', error);
+        console.error("Error fetching reservations:", error);
         res.status(500).json({
             success: false,
-            message: 'Internal server error',
-            error: error.message
+            message: "Internal server error",
+            error: error.message,
         });
     }
 };

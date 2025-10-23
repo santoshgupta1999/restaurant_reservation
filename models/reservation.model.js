@@ -35,9 +35,11 @@ const reservationSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'confirmed', 'cancelled', 'completed'],
-        default: 'pending'
-    }
+        enum: ["Pending", "Confirmed", "Seated", "Cancelled", "No-show", "Finished"],
+        default: 'Pending'
+    },
+    source: { type: String, enum: ["Online", "Walk-in", "Phone"], default: "Online" },
+    notes: String
 }, { timestamps: true });
 
 module.exports = mongoose.model('Reservation', reservationSchema);

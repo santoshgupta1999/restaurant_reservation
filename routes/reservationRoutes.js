@@ -8,7 +8,7 @@ const { validate } = require('../middlewares/validationResultHandler');
 
 
 router.post('/add',
-    verifyToken, requireRole('user'),
+    verifyToken,
     reservationValidator,
     validate,
     reservController.createReservation
@@ -27,7 +27,7 @@ router.post('/update/:id',
 
 router.delete('/:id', verifyToken, validate, reservController.deleteReservation);
 
-router.get('/admin/get', verifyToken, requireRole('admin'), reservController.getAllReservationsByAdmin);
+router.get('/admin/get', reservController.getAllReservationsByAdmin);
 
 router.post('/status/:id',
     verifyToken,

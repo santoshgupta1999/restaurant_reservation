@@ -33,6 +33,6 @@ exports.reservationValidator = [
 exports.reservationStatusValidator = [
     body('status')
         .notEmpty().withMessage('Status is required')
-        .isIn(['pending', 'confirmed', 'cancelled', 'completed'])
-        .withMessage('Invalid status. Allowed: pending, confirmed, cancelled, completed')
+        .isIn(["Pending", "Confirmed", "Seated", "Cancelled", "No-show", "Finished"])
+        .withMessage('Invalid status. Allowed: Pending, Confirmed, Seated, Cancelled, No-show')
 ];

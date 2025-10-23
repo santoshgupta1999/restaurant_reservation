@@ -5,7 +5,10 @@ const {
     getProfile,
     updateProfile,
     logout,
-    changePassword
+    changePassword,
+    forgotPassword,
+    verifyOtp,
+    resetPassword
 } = require("../controllers/user.controllers.js");
 
 const { registerValidation, loginValidation, handleValidationErrors } = require("../validators/userValidation.js");
@@ -19,5 +22,8 @@ router.get('/profile', verifyToken, getProfile);
 router.post('/profile', upload.single('profile'), verifyToken, updateProfile);
 router.post('/logout', verifyToken, logout);
 router.post('/change-password', verifyToken, changePassword);
+router.post('/forgot-password', forgotPassword);
+router.post('/verify-otp', verifyToken, verifyOtp);
+router.post('/reset-password', verifyToken, resetPassword);
 
 module.exports = router;
