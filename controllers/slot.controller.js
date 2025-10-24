@@ -3,29 +3,30 @@ const Slot = require('../models/slot.model');
 
 exports.addOrUpdateSlot = async (req, res) => {
     try {
-        const { restaurantId, day, slots } = req.body;
+        const { restaurantId, day, shiftName, slots } = req.body;
 
-        if (!restaurantId || !day || !slots || !Array.isArray(slots)) {
+        if (!restaurantId || !day || !shiftName || !Array.isArray(slots)) {
             return res.status(400).json({
                 success: false,
-                message: "Missing or invalid input"
+                message: "Missing or invalid input (restaurantId, day, shiftName, slots required)"
             });
         }
 
-        const existingSlot = await Slot.findOne({ restaurantId, day });
+        const existingSlot = await Slot.findOne({ restaurantId, day, shiftName });
 
         let message = "";
 
         if (existingSlot) {
             await Slot.updateOne(
-                { restaurantId, day },
+                { restaurantId, day, shiftName },
                 { $set: { slots } }
             );
-            message = "Slots updated successfully";
+            message = `Slots for ${day} (${shiftName}) updated successfully.`;
         } else {
-            await Slot.create({ restaurantId, day, slots });
-            message = "Slots added successfully";
+            await Slot.create({ restaurantId, day, shiftName, slots });
+            message = `Slots for ${day} (${shiftName}) added successfully.`;
         }
+
         return res.status(200).json({
             success: true,
             message

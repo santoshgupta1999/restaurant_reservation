@@ -342,7 +342,7 @@ exports.getAllReservationsByAdmin = async (req, res) => {
         const reservations = await Reservation.find(query)
             .populate("userId", "name email")
             .populate("restaurantId", "name email phone address")
-            .populate("tableId", "tableNumber seatCount")
+            .populate("tableId", "tableNumber seatCount areaName")
             .sort({ date: 1 });
 
         return res.status(200).json({

@@ -2,24 +2,24 @@ const Table = require('../models/table.model');
 
 exports.createTable = async (req, res) => {
     try {
-        const { restaurantId, tableNumber, seatCount } = req.body;
+        const { restaurantId, tableNumber, seatCount, areaName } = req.body;
 
-        const newTable = new Table({ restaurantId, tableNumber, seatCount });
-        if (!restaurantId || !tableNumber || !seatCount) {
+        if (!restaurantId || !tableNumber || !seatCount || !areaName) {
             return res.status(400).json({
                 success: false,
-                message: 'All fields are required'
+                message: 'All fields (restaurantId, tableNumber, seatCount, areaName) are required'
             });
         }
 
-        const existingTable = await Table.findOne({ tableNumber });
+        const existingTable = await Table.findOne({ restaurantId, tableNumber });
         if (existingTable) {
             return res.status(400).json({
                 success: false,
-                message: 'Table No already exists'
+                message: 'Table number already exists for this restaurant'
             });
         }
 
+        const newTable = new Table({ restaurantId, tableNumber, seatCount, areaName });
         await newTable.save();
 
         return res.status(201).json({
@@ -27,7 +27,9 @@ exports.createTable = async (req, res) => {
             message: 'Table added successfully',
             data: newTable
         });
+
     } catch (error) {
+        console.error("Error adding table:", error);
         res.status(500).json({
             success: false,
             message: 'Error adding table',
@@ -67,38 +69,53 @@ exports.getTablesByRestaurants = async (req, res) => {
 exports.updateTable = async (req, res) => {
     try {
         const { id } = req.params;
-        const {
-            tableNumber,
-            seatCount
-        } = req.body;
+        const { restaurantId, tableNumber, seatCount, areaName } = req.body;
 
-        const existingTable = await Table.findOne({ tableNumber, _id: { $ne: id } });
-        if (existingTable) {
+        if (!restaurantId || !tableNumber || !seatCount || !areaName) {
             return res.status(400).json({
                 success: false,
-                message: 'Table Number already exists.'
+                message: 'All fields (restaurantId, tableNumber, seatCount, areaName) are required.'
             });
         }
 
-        const updated = await Table.findByIdAndUpdate(id, { tableNumber, seatCount }, { new: true });
-        if (!updated) {
+        const existingTable = await Table.findOne({
+            restaurantId,
+            tableNumber,
+            _id: { $ne: id }
+        });
+
+        if (existingTable) {
+            return res.status(400).json({
+                success: false,
+                message: 'Table number already exists for this restaurant.'
+            });
+        }
+
+        const updatedTable = await Table.findByIdAndUpdate(
+            id,
+            { restaurantId, tableNumber, seatCount, areaName },
+            { new: true }
+        );
+
+        if (!updatedTable) {
             return res.status(404).json({
                 success: false,
-                message: 'Table not found'
+                message: 'Table not found.'
             });
         }
 
         return res.status(200).json({
             success: true,
-            message: 'Table updated successfully',
+            message: 'Table updated successfully.',
+            data: updatedTable
         });
 
     } catch (error) {
-        console.error('Error updating tables', error);
+        console.error('Error updating table:', error);
         res.status(500).json({
             success: false,
-            message: 'Error updating tables',
-            Error: error.message
+            message: 'Error updating table.',
+            error: error.message
         });
     }
 };

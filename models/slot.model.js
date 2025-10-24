@@ -1,4 +1,3 @@
-// models/slot.model.js
 const mongoose = require('mongoose');
 
 const timeSlotSchema = new mongoose.Schema({
@@ -15,6 +14,11 @@ const slotSchema = new mongoose.Schema({
     day: {
         type: String,
         enum: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+        required: true
+    },
+    shiftName: {
+        type: String,
+        enum: ['Breakfast', 'Brunch', 'Lunch', 'Dinner'],
         required: true
     },
     slots: {

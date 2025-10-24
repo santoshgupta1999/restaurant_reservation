@@ -8,13 +8,12 @@ const { verifyToken, requireRole } = require('../middlewares/auth.middleware');
 const upload = require('../middlewares/upload.middleware');
 const { reviewValidator, checkDuplicateReview } = require('../validators/reviewValidation');
 const { validate } = require('../middlewares/validationResultHandler');
-const { dishValidator } = require('../validators/dishValidation');
 
 // ------------------------------------------- Slots ----------------------------------- //
 
-router.post('/slot/add_update', verifyToken, requireRole('admin', 'manager'), slotController.addOrUpdateSlot);
-router.get('/slot', verifyToken, requireRole('admin'), slotController.getSlotsByRestaurant);
-router.delete('/slot/:id', verifyToken, requireRole('admin'), slotController.deleteSlot);
+router.post('/slot/add_update', slotController.addOrUpdateSlot);
+router.get('/slot', slotController.getSlotsByRestaurant);
+router.delete('/slot/:id', slotController.deleteSlot);
 
 // ------------------------------------------- Table ----------------------------------- //
 

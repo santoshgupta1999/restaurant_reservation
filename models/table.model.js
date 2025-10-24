@@ -14,7 +14,14 @@ const tableSchema = new mongoose.Schema({
     seatCount: {
         type: Number,
         required: true
+    },
+    areaName: {
+        type: String,
+        enum: ['Main Dining', 'First Floor', 'Bar'],
+        required: true
     }
 }, { timestamps: true });
+
+tableSchema.index({ restaurantId: 1, tableNumber: 1 }, { unique: true });
 
 module.exports = mongoose.model('Table', tableSchema);
