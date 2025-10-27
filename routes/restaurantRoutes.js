@@ -4,10 +4,12 @@ const router = express.Router();
 const slotController = require('../controllers/slot.controller');
 const tableController = require('../controllers/table.controller');
 const reviewController = require('../controllers/review.controller');
+const blockController = require('../controllers/block.controller');
 const { verifyToken, requireRole } = require('../middlewares/auth.middleware');
 const upload = require('../middlewares/upload.middleware');
 const { reviewValidator, checkDuplicateReview } = require('../validators/reviewValidation');
 const { validate } = require('../middlewares/validationResultHandler');
+const { blockValidator } = require('../validators/blockValidator');
 
 // ------------------------------------------- Slots ----------------------------------- //
 
@@ -18,7 +20,7 @@ router.delete('/slot/:id', slotController.deleteSlot);
 // ------------------------------------------- Table ----------------------------------- //
 
 router.post('/table/add', verifyToken, tableController.createTable);
-router.get('/table/', verifyToken, requireRole('admin'), tableController.getTablesByRestaurants);
+router.get('/table', verifyToken, requireRole('admin'), tableController.getTablesByRestaurants);
 router.post('/table/update/:id', verifyToken, requireRole('admin'), tableController.updateTable);
 router.delete('/table/:id', verifyToken, requireRole('admin'), tableController.deleteTable);
 
@@ -35,4 +37,13 @@ router.get('/review', verifyToken, requireRole('user'), reviewController.getRevi
 router.get('/admin/reviews', verifyToken, requireRole('admin'), reviewController.getAllReviewsByAdmin);
 router.get('/avg_rating/:restaurantId', verifyToken, requireRole('admin'), reviewController.getAverageRating);
 
-module.exports = router; 
+
+// ------------------------------------------- Block ------------------------------------- //
+
+router.post('/block', blockValidator, validate, blockController.createBlock);
+router.get('/block/all', blockController.getAllBlocks);
+router.get('/block/:id', blockController.getBlockById);
+router.put('/block/:id', blockValidator, validate, blockController.updateBlock);
+router.delete('/block/:id', blockController.deleteBlock);
+
+module.exports = router;

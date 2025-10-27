@@ -108,6 +108,7 @@ exports.getProfile = async (req, res) => {
                 Id: user.id,
                 name: user.name,
                 email: user.email,
+                phone: user.phone,
                 role: user.role,
                 imageUrl: `${req.protocol}://${req.get('host')}/uploads/users/${user.profileImage}`
             }
