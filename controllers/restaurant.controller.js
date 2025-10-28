@@ -1,4 +1,5 @@
 const Restaurant = require('../models/restaurant.model');
+const Shift = require('../models/shift.model');
 const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
@@ -279,6 +280,190 @@ exports.deleteRestaurant = async (req, res) => {
             success: false,
             message: 'Error deleting restaurant',
             error: err.message
+        });
+    }
+};
+
+// -------------------------------------------- Shift -------------------------------------------- //
+
+exports.createShift = async (req, res) => {
+    try {
+        const shift = await Shift.create(req.body);
+
+        return res.status(201).json({
+            success: true,
+            message: "Shift created successfully",
+            data: shift
+        });
+
+    } catch (error) {
+        console.error('Error creating shift', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error during creating shifts',
+            Error: error.message
+        });
+    }
+};
+
+exports.getAllShift = async (req, res) => {
+    try {
+        const { restaurantId } = req.query;
+        const query = {};
+
+        if (restaurantId) query.restaurantId = restaurantId;
+
+        const shifts = await Shift.find(query).populate("restaurantId", "name email phone");
+
+        res.status(200).json({
+            success: true,
+            message: 'Shift fetched successfully',
+            count: shifts.length,
+            data: shifts
+        });
+
+    } catch (error) {
+        console.error("Error fetching shifts:", error);
+        res.status(500).json({
+            success: false,
+            message: "Internal server error",
+            error: error.message
+        });
+    }
+};
+
+exports.getShiftById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const shift = await Shift.findById(id).populate("restaurantId", "name");
+        if (!shift) {
+            return res.status(404).json({
+                success: false,
+                message: 'Shift not found'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Shifts fetched successfully',
+            data: shift
+        });
+
+    } catch (error) {
+        console.error('Error while fetching shifts');
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching shifts',
+            Error: error.message
+        });
+    }
+};
+
+exports.updateShift = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const updatedShift = await Shift.findOneAndUpdate({ _id: id }, req.body, { new: true });
+        if (!updatedShift) {
+            return res.status(404).json({
+                success: false,
+                message: 'Shift not found'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Shift updated successfully',
+            data: updatedShift
+        });
+
+    } catch (error) {
+        console.error('Error while updating shifts', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error while updating shifts',
+            Error: error.message
+        });
+    }
+};
+
+exports.deleteShift = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const deletedShift = await Shift.findByIdAndDelete(id);
+
+        if (!deletedShift) {
+            return res.status(404).json({
+                success: false,
+                message: "Shift not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Shift deleted successfully"
+        });
+
+    } catch (error) {
+        console.error("Error deleting shift:", error);
+        res.status(500).json({
+            success: false,
+            message: "Internal server error",
+            error: error.message
+        });
+    }
+};
+
+exports.getActiveShiftsForToday = async (req, res) => {
+    try {
+        const { restaurantId } = req.query;
+
+        if (!restaurantId) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId is required in query params."
+            });
+        }
+
+        const today = new Date();
+        const dayOfWeek = today.toLocaleDateString("en-US", { weekday: "long" });
+
+        const shifts = await Shift.find({
+            restaurantId,
+            isActive: true,
+            $or: [
+                { isIndefinite: true },
+                {
+                    $and: [
+                        { startDate: { $lte: today } },
+                        { endDate: { $gte: today } }
+                    ]
+                }
+            ],
+            daysActive: dayOfWeek
+        }).sort({ startTime: 1 });
+
+        if (!shifts.length) {
+            return res.status(404).json({
+                success: false,
+                message: `No active shifts found for ${dayOfWeek}.`
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Active shifts for ${dayOfWeek} fetched successfully.`,
+            count: shifts.length,
+            data: shifts
+        });
+
+    } catch (error) {
+        console.error("Error fetching active shifts:", error);
+        res.status(500).json({
+            success: false,
+            message: "Internal server error",
+            error: error.message
         });
     }
 };

@@ -5,11 +5,13 @@ const slotController = require('../controllers/slot.controller');
 const tableController = require('../controllers/table.controller');
 const reviewController = require('../controllers/review.controller');
 const blockController = require('../controllers/block.controller');
+const restaurantController = require('../controllers/restaurant.controller');
 const { verifyToken, requireRole } = require('../middlewares/auth.middleware');
 const upload = require('../middlewares/upload.middleware');
 const { reviewValidator, checkDuplicateReview } = require('../validators/reviewValidation');
 const { validate } = require('../middlewares/validationResultHandler');
 const { blockValidator } = require('../validators/blockValidator');
+const { shiftValidator } = require('../validators/shiftValidator');
 
 // ------------------------------------------- Slots ----------------------------------- //
 
@@ -45,5 +47,14 @@ router.get('/block/all', blockController.getAllBlocks);
 router.get('/block/:id', blockController.getBlockById);
 router.put('/block/:id', blockValidator, validate, blockController.updateBlock);
 router.delete('/block/:id', blockController.deleteBlock);
+
+// ------------------------------------------ Shift -------------------------------------- //
+
+router.post('/shift', shiftValidator, validate, restaurantController.createShift);
+router.get('/shift_all', restaurantController.getAllShift);
+router.get('/shift/:id', restaurantController.getShiftById);
+router.put('/shift/:id', shiftValidator, validate, restaurantController.updateShift);
+router.delete('/shift/:id', restaurantController.deleteShift);
+router.get('/shift/active/today', restaurantController.getActiveShiftsForToday);
 
 module.exports = router;
