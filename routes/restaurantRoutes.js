@@ -21,11 +21,12 @@ router.delete('/slot/:id', slotController.deleteSlot);
 
 // ------------------------------------------- Table ----------------------------------- //
 
-router.post('/table/add', verifyToken, tableController.createTable);
-router.get('/table', verifyToken, requireRole('admin'), tableController.getTablesByRestaurants);
-router.post('/table/update/:id', verifyToken, requireRole('admin'), tableController.updateTable);
-router.delete('/table/:id', verifyToken, requireRole('admin'), tableController.deleteTable);
-
+router.post('/table/add', tableController.createTable);
+router.get('/table', tableController.getAllTables);
+router.get('/table/:id', tableController.getTableById);
+router.get('/tables/available', tableController.getAvailableTables);
+router.put('/table/update/:id', tableController.updateTable);
+router.delete('/table/:id', tableController.deleteTable);
 
 // ------------------------------------------- Review ----------------------------------- //
 

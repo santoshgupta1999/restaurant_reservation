@@ -1,67 +1,93 @@
 const Table = require('../models/table.model');
+const Reservation = require('../models/reservation.model');
+const Block = require('../models/block.model');
+const Shift = require('../models/shift.model');
 
 exports.createTable = async (req, res) => {
     try {
-        const { restaurantId, tableNumber, seatCount, areaName } = req.body;
+        const { restaurantId, roomName, tableNumber, capacity, position } = req.body;
 
-        if (!restaurantId || !tableNumber || !seatCount || !areaName) {
+        const exists = await Table.findOne({ restaurantId, tableNumber });
+        if (exists) {
             return res.status(400).json({
                 success: false,
-                message: 'All fields (restaurantId, tableNumber, seatCount, areaName) are required'
+                message: 'Table number already exists for this restaurant.'
             });
         }
 
-        const existingTable = await Table.findOne({ restaurantId, tableNumber });
-        if (existingTable) {
-            return res.status(400).json({
-                success: false,
-                message: 'Table number already exists for this restaurant'
-            });
-        }
+        const table = new Table({
+            restaurantId,
+            roomName,
+            tableNumber,
+            capacity,
+            position
+        });
 
-        const newTable = new Table({ restaurantId, tableNumber, seatCount, areaName });
-        await newTable.save();
+        await table.save();
 
-        return res.status(201).json({
+        res.status(201).json({
             success: true,
-            message: 'Table added successfully',
-            data: newTable
+            message: 'Table created successfully.',
+            data: table
         });
 
     } catch (error) {
-        console.error("Error adding table:", error);
+        console.error('Error creating table:', error);
         res.status(500).json({
             success: false,
-            message: 'Error adding table',
+            message: 'Error creating table.',
             error: error.message
         });
     }
 };
 
-exports.getTablesByRestaurants = async (req, res) => {
+exports.getAllTables = async (req, res) => {
     try {
         const { restaurantId } = req.query;
+        const filter = restaurantId ? { restaurantId } : {};
 
-        const tables = await Table.find({ restaurantId });
-        if (!tables) {
+        const tables = await Table.find(filter).populate('restaurantId', 'name email phone');
+
+        res.status(200).json({
+            success: true,
+            message: 'Tables fetched successfully.',
+            count: tables.length,
+            data: tables
+        });
+    } catch (error) {
+        console.error('Error fetching tables:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching tables.',
+            error: error.message
+        });
+    }
+};
+
+exports.getTableById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const table = await Table.findById(id).populate('restaurantId', 'name email phone');
+
+        if (!table) {
             return res.status(404).json({
                 success: false,
-                message: 'Tables not found'
+                message: 'Table not found.'
             });
         }
 
-        return res.status(200).json({
+        res.status(200).json({
             success: true,
-            message: 'Tables fetched successfully',
-            Data: tables
+            message: 'Table details fetched successfully.',
+            data: table
         });
 
     } catch (error) {
-        console.error('Error fetching tables', error);
+        console.error('Error fetching table:', error);
         res.status(500).json({
             success: false,
-            message: 'Error fetching tables',
-            Error: error.message
+            message: 'Error fetching table.',
+            error: error.message
         });
     }
 };
@@ -69,45 +95,38 @@ exports.getTablesByRestaurants = async (req, res) => {
 exports.updateTable = async (req, res) => {
     try {
         const { id } = req.params;
-        const { restaurantId, tableNumber, seatCount, areaName } = req.body;
+        const { restaurantId, roomName, tableNumber, capacity, status, position } = req.body;
 
-        if (!restaurantId || !tableNumber || !seatCount || !areaName) {
-            return res.status(400).json({
-                success: false,
-                message: 'All fields (restaurantId, tableNumber, seatCount, areaName) are required.'
-            });
-        }
-
-        const existingTable = await Table.findOne({
+        const duplicate = await Table.findOne({
             restaurantId,
             tableNumber,
             _id: { $ne: id }
         });
 
-        if (existingTable) {
+        if (duplicate) {
             return res.status(400).json({
                 success: false,
-                message: 'Table number already exists for this restaurant.'
+                message: 'Another table with this number already exists in the restaurant.'
             });
         }
 
-        const updatedTable = await Table.findByIdAndUpdate(
+        const updated = await Table.findByIdAndUpdate(
             id,
-            { restaurantId, tableNumber, seatCount, areaName },
-            { new: true }
+            { restaurantId, roomName, tableNumber, capacity, status, position },
+            { new: true, runValidators: true }
         );
 
-        if (!updatedTable) {
+        if (!updated) {
             return res.status(404).json({
                 success: false,
                 message: 'Table not found.'
             });
         }
 
-        return res.status(200).json({
+        res.status(200).json({
             success: true,
             message: 'Table updated successfully.',
-            data: updatedTable
+            data: updated
         });
 
     } catch (error) {
@@ -128,21 +147,97 @@ exports.deleteTable = async (req, res) => {
         if (!deleted) {
             return res.status(404).json({
                 success: false,
-                message: 'Table not found'
+                message: 'Table not found.'
             });
         }
 
-        return res.status(200).json({
+        res.status(200).json({
             success: true,
-            message: 'Table deleted successfully'
+            message: 'Table deleted successfully.'
         });
 
     } catch (error) {
-        console.error('Error deleting table');
+        console.error('Error deleting table:', error);
         res.status(500).json({
             success: false,
-            message: 'Error updating table',
-            Error: error.message
+            message: 'Error deleting table.',
+            error: error.message
+        });
+    }
+};
+
+exports.getAvailableTables = async (req, res) => {
+    try {
+        const { restaurantId, date, shiftId } = req.query;
+
+        if (!restaurantId || !date || !shiftId) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId, date, and shiftId are required.",
+            });
+        }
+
+        const reservationDate = new Date(date);
+
+        // Fetch the shift details
+        const shift = await Shift.findById(shiftId);
+        if (!shift) {
+            return res.status(404).json({
+                success: false,
+                message: "Shift not found.",
+            });
+        }
+
+        // Get all tables of restaurant
+        const allTables = await Table.find({ restaurantId });
+        if (!allTables.length) {
+            return res.status(404).json({
+                success: false,
+                message: "No tables found for this restaurant.",
+            });
+        }
+
+        // Get blocked tables (if any)
+        const blockedTables = await Block.find({
+            restaurantId,
+            isActive: true,
+            startDate: { $lte: reservationDate },
+            endDate: { $gte: reservationDate },
+        }).select("tableIds");
+
+        const blockedIds = blockedTables.flatMap(b => b.tableIds.map(id => id.toString()));
+
+        // Get reserved tables for same date & shift time
+        const reservedTables = await Reservation.find({
+            restaurantId,
+            date: reservationDate,
+            "slot.startTime": shift.startTime,
+            "slot.endTime": shift.endTime,
+            status: { $nin: ["Cancelled", "No-show"] },
+        }).select("tableId");
+
+        const reservedIds = reservedTables.map(r => r.tableId.toString());
+
+        // Filter out blocked + reserved tables
+        const unavailableIds = [...new Set([...blockedIds, ...reservedIds])];
+        const availableTables = allTables.filter(
+            table => !unavailableIds.includes(table._id.toString())
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Available tables fetched successfully.",
+            total: availableTables.length,
+            shift: shift.name,
+            data: availableTables,
+        });
+
+    } catch (error) {
+        console.error("Error fetching available tables:", error);
+        res.status(500).json({
+            success: false,
+            message: "Internal server error.",
+            error: error.message,
         });
     }
 };

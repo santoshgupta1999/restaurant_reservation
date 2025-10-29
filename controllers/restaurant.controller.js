@@ -9,24 +9,20 @@ const baseUrl = process.env.BASE_URL;
 exports.createRestaurant = async (req, res) => {
     try {
         const {
-            name, email, phone, address, openingHours, cuisine
+            name, email, phone, address, openingHours
         } = req.body;
 
         const existingRestaurant = await Restaurant.findOne({ email });
         if (existingRestaurant) {
             return res.status(400).json({
                 success: false,
-                message: 'Email already exists. Please use another email.'
+                message: 'Email already in use. Please use another email.'
             });
         }
 
         const logo = req.files['logo']
             ? `${req.files['logo'][0].filename}`
             : null;
-
-        const images = req.files['images']
-            ? req.files['images'].map(file => `${file.filename}`)
-            : [];
 
         const createdBy = req.user?._id;
 
@@ -36,9 +32,7 @@ exports.createRestaurant = async (req, res) => {
             phone,
             address,
             openingHours: JSON.parse(openingHours),
-            cuisine: JSON.parse(cuisine),
             logo,
-            images,
             createdBy
         });
 
@@ -46,7 +40,6 @@ exports.createRestaurant = async (req, res) => {
         return res.status(201).json({
             success: true,
             message: 'Restaurant created successfully',
-            Id: newRestaurant.id,
             data: newRestaurant
         });
 
@@ -62,11 +55,10 @@ exports.createRestaurant = async (req, res) => {
 
 exports.getRestaurants = async (req, res) => {
     try {
-        const { page = 1, limit = 10, name, cuisine, status } = req.query;
+        const { page = 1, limit = 10, name, status } = req.query;
 
         const query = {};
         if (name) query.name = { $regex: name, $options: 'i' };
-        if (cuisine) query.cuisine = cuisine;
         if (status) query.status = status;
 
         const total = await Restaurant.countDocuments(query);
@@ -80,7 +72,6 @@ exports.getRestaurants = async (req, res) => {
         const transformed = restaurants.map((r) => ({
             ...r._doc,
             logo: r.logo ? `${host}/uploads/restaurants/logo/${r.logo}` : null,
-            images: r.images?.map(img => `${host}/uploads/restaurants/images/${img}`) || []
         }));
 
         return res.status(200).json({
@@ -125,8 +116,7 @@ exports.getRestaurantById = async (req, res) => {
         const host = `${req.protocol}://${req.get('host')}`;
         const transformed = {
             ...restaurant._doc,
-            logo: restaurant.logo ? `${host}/uploads/restaurants/logo/${restaurant.logo}` : null,
-            images: restaurant.images?.map(img => `${host}/uploads/restaurants/images/${img}`) || []
+            logo: restaurant.logo ? `${host}/uploads/restaurants/logo/${restaurant.logo}` : null
         };
 
         return res.status(200).json({
@@ -170,18 +160,6 @@ exports.updateRestaurant = async (req, res) => {
             }
         }
 
-        if (updateFields.cuisine) {
-            try {
-                updateFields.cuisine = JSON.parse(updateFields.cuisine);
-            } catch (e) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Invalid JSON in cuisine',
-                    error: e.message
-                });
-            }
-        }
-
         if (req.files?.logo) {
             const newLogo = req.files.logo[0].filename;
 
@@ -194,22 +172,6 @@ exports.updateRestaurant = async (req, res) => {
             }
 
             updateFields.logo = newLogo;
-        }
-
-        if (req.files?.images) {
-            const newImages = req.files.images.map(file => file.filename);
-
-            // Delete old images
-            if (restaurant.images && restaurant.images.length > 0) {
-                for (const img of restaurant.images) {
-                    const imgPath = path.join(__dirname, '../uploads/restaurants/images/', img);
-                    if (fs.existsSync(imgPath)) {
-                        fs.unlinkSync(imgPath);
-                    }
-                }
-            }
-
-            updateFields.images = newImages;
         }
 
         const updatedRestaurant = await Restaurant.findByIdAndUpdate(
