@@ -223,14 +223,6 @@ exports.deleteRestaurant = async (req, res) => {
             if (fs.existsSync(logoPath)) fs.unlinkSync(logoPath);
         }
 
-        // Auto-delete image files if exist
-        if (restaurant.images && restaurant.images.length > 0) {
-            restaurant.images.forEach(img => {
-                const imgPath = path.join(__dirname, '../uploads/restaurants/images/', img);
-                if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
-            });
-        }
-
         return res.status(200).json({
             success: true,
             message: 'Restaurant deleted successfully'
@@ -242,6 +234,125 @@ exports.deleteRestaurant = async (req, res) => {
             success: false,
             message: 'Error deleting restaurant',
             error: err.message
+        });
+    }
+};
+
+exports.getActiveRestaurants = async (req, res) => {
+    try {
+        const {
+            keyword = "",
+            page = 1,
+            limit = 10,
+            sortBy = "createdAt",
+            order = "desc"
+        } = req.query;
+
+        const filter = { status: "active" };
+
+        if (keyword.trim() !== "") {
+            filter.$or = [
+                { name: { $regex: keyword, $options: "i" } },
+                { address: { $regex: keyword, $options: "i" } }
+            ];
+        }
+
+        const pageNumber = parseInt(page, 10);
+        const pageSize = parseInt(limit, 10);
+        const skip = (pageNumber - 1) * pageSize;
+
+        const sortOrder = order === "asc" ? 1 : -1;
+        const sortQuery = { [sortBy]: sortOrder };
+
+        const [restaurants, total] = await Promise.all([
+            Restaurant.find(filter)
+                .populate("createdBy", "name email")
+                .sort(sortQuery)
+                .skip(skip)
+                .limit(pageSize),
+            Restaurant.countDocuments(filter)
+        ]);
+
+        if (!restaurants.length) {
+            return res.status(404).json({
+                success: false,
+                message:
+                    keyword.trim() !== ""
+                        ? "No matching active restaurants found."
+                        : "No active restaurants found."
+            });
+        }
+
+        const totalPages = Math.ceil(total / pageSize);
+
+        return res.status(200).json({
+            success: true,
+            message:
+                keyword.trim() !== ""
+                    ? "Matching active restaurants fetched successfully."
+                    : "Active restaurants fetched successfully.",
+            count: restaurants.length,
+            data: restaurants,
+            pagination: {
+                total,
+                page: pageNumber,
+                limit: pageSize,
+                totalPages
+            }
+        });
+    } catch (error) {
+        console.error("Error fetching active restaurants:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching active restaurants.",
+            error: error.message
+        });
+    }
+};
+
+exports.updateRestaurantStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+        // const userId = req.user?._id;
+
+        if (!['active', 'inactive'].includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid status. Must be "active" or "inactive".'
+            });
+        }
+
+        const restaurant = await Restaurant.findById(id);
+        if (!restaurant) {
+            return res.status(404).json({
+                success: false,
+                message: 'Restaurant not found'
+            });
+        }
+
+        // if (restaurant.createdBy.toString() !== userId.toString()) {
+        //     return res.status(403).json({
+        //         success: false,
+        //         message: 'You are not authorized to update this restaurant'
+        //     });
+        // }
+
+        restaurant.status = status;
+        await restaurant.save();
+
+        return res.status(200).json({
+            success: true,
+            message: `Restaurant status updated to "${status}" successfully`
+            // data: restaurant
+        });
+
+    } catch (error) {
+        console.error('Error updating restaurant status:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error updating restaurant status',
+            error: error.message
         });
     }
 };

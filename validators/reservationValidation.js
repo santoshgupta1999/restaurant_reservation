@@ -1,38 +1,28 @@
-const { body } = require('express-validator');
+const { body } = require("express-validator");
 
 exports.reservationValidator = [
-    body('restaurantId')
-        .notEmpty().withMessage('Restaurant ID is required')
-        .isMongoId().withMessage('Invalid Restaurant ID'),
+    body("restaurantId")
+        .notEmpty().withMessage("Restaurant ID is required.")
+        .isMongoId().withMessage("Invalid Restaurant ID."),
 
-    body('tableId')
-        .notEmpty().withMessage('Table ID is required')
-        .isMongoId().withMessage('Invalid Table ID'),
+    body("shiftId")
+        .notEmpty().withMessage("Shift ID is required.")
+        .isMongoId().withMessage("Invalid Shift ID."),
 
-    body('date')
-        .notEmpty().withMessage('Date is required')
-        .isISO8601().toDate().withMessage('Invalid date format'),
+    body("guestName").notEmpty().withMessage("Guest name is required."),
+    body("guestEmail").isEmail().withMessage("Invalid email."),
+    body("guestPhone")
+        .notEmpty().withMessage("Phone number is required."),
+        // .matches(/^[0-9]{10}$/).withMessage("Phone must be 10 digits."),
 
-    body('guestCount')
-        .notEmpty().withMessage('Guest count is required')
-        .isInt({ min: 1 }).withMessage('Guest count must be at least 1'),
+    body("date")
+        .notEmpty().withMessage("Reservation date is required.")
+        .isISO8601().toDate().withMessage("Invalid date format."),
 
-    body('slot')
-        .notEmpty().withMessage('Slot is required')
-        .isObject().withMessage('Slot must be an object'),
+    body("time")
+        .notEmpty().withMessage("Time is required.")
+        .matches(/^([01]\d|2[0-3]):([0-5]\d)$/).withMessage("Invalid time format (HH:mm)."),
 
-    body('slot.startTime')
-        .notEmpty().withMessage('Slot start time is required')
-        .matches(/^([01]\d|2[0-3]):([0-5]\d)$/).withMessage('Invalid start time format (HH:mm)'),
-
-    body('slot.endTime')
-        .notEmpty().withMessage('Slot end time is required')
-        .matches(/^([01]\d|2[0-3]):([0-5]\d)$/).withMessage('Invalid end time format (HH:mm)')
-];
-
-exports.reservationStatusValidator = [
-    body('status')
-        .notEmpty().withMessage('Status is required')
-        .isIn(["Pending", "Confirmed", "Seated", "Cancelled", "No-show", "Finished"])
-        .withMessage('Invalid status. Allowed: Pending, Confirmed, Seated, Cancelled, No-show')
+    body("partySize")
+        .isInt({ min: 1 }).withMessage("Party size must be at least 1.")
 ];

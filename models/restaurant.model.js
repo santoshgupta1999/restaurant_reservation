@@ -25,7 +25,6 @@ const restaurantSchema = new mongoose.Schema(
         openingHours: {
             type: String,
             required: true,
-            match: [/^([1-9]|1[0-2])(AM|PM)-([1-9]|1[0-2])(AM|PM)$/, 'Invalid opening hours format']
         },
         logo: {
             type: String

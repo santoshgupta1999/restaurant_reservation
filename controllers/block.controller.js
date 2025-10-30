@@ -13,7 +13,7 @@ exports.createBlock = async (req, res) => {
             startDate,
             endDate,
             daysActive,
-            slotIds,
+            shiftIds,
             note
         } = req.body;
 
@@ -34,9 +34,9 @@ exports.createBlock = async (req, res) => {
             }
         }
 
-        if (slotIds.length > 0) {
-            const existingSlots = await Slot.find({ _id: { $in: slotIds } });
-            if (existingSlots.length !== slotIds.length) {
+        if (shiftIds.length > 0) {
+            const existingShifts = await Slot.find({ _id: { $in: shiftIds } });
+            if (existingShifts.length !== shiftIds.length) {
                 return res.status(400).json({
                     success: false,
                     message: "One or more slotIds do not exist in the database",
@@ -52,7 +52,7 @@ exports.createBlock = async (req, res) => {
             startDate,
             endDate,
             daysActive,
-            slotIds,
+            shiftIds,
             note
         });
 
@@ -82,7 +82,7 @@ exports.getAllBlocks = async (req, res) => {
         const blocks = await Block.find(query)
             .populate("restaurantId", "name")
             .populate("tableIds", "tableNumber areaName seatCount")
-            .populate("slotIds", "day shiftName slots");
+            .populate("shiftIds", "name startDate endDate startTime endTime");
 
         res.status(200).json({
             success: true,

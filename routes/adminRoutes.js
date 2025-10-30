@@ -20,5 +20,7 @@ router.put('/restaurants/:id',
     ]), restaurantValidator, verifyToken, restController.updateRestaurant);
 
 router.delete('/restaurants/:id', verifyToken, restController.deleteRestaurant);
+router.get('/getActiveRestaurants', verifyToken, restController.getActiveRestaurants);
+router.put('/updateRestaurantStatus/:id', restController.updateRestaurantStatus);
 
 module.exports = router;

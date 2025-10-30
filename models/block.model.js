@@ -9,7 +9,7 @@ const blockSchema = new mongoose.Schema(
         startDate: { type: Date, required: true },
         endDate: { type: Date, required: true },
         daysActive: [{ type: String }],
-        slotIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Slot" }],
+        shiftIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Shift" }],
         isActive: { type: Boolean, default: true },
         note: { type: String },
     },
