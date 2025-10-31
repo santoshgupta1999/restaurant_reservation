@@ -14,25 +14,16 @@ router.post('/add',
     reservController.createReservation
 );
 
-// router.get('/', verifyToken, requireRole('user'), reservController.getReservation);
-// router.get('/:id', verifyToken, requireRole('user'), reservController.getReservationById);
+router.get('/', reservController.getReservations);
+router.get('/:id', reservController.getReservationById);
 
-// router.post('/update/:id',
-//     verifyToken,
-//     requireRole('user'),
-//     reservationValidator,
-//     validate,
-//     reservController.updateReservation
-// );
+router.put('/update/:id',
+    reservationValidator,
+    validate,
+    reservController.updateReservationById
+);
 
-// router.delete('/:id', verifyToken, validate, reservController.deleteReservation);
-
-// router.get('/admin/get', reservController.getAllReservationsByAdmin);
-
-// router.post('/status/:id',
-//     verifyToken,
-//     requireRole('admin'),
-//     reservController.updateReservationStatus
-// );
+router.delete('/:id', reservController.deleteReservationById);
+router.post('/status/:id', reservController.updateReservationStatus);
 
 module.exports = router;

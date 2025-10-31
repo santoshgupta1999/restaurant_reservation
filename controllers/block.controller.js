@@ -1,6 +1,6 @@
 const Block = require("../models/block.model");
 const Table = require("../models/table.model");
-const Slot = require("../models/slot.model");
+const Shift = require("../models/shift.model");
 
 
 exports.createBlock = async (req, res) => {
@@ -35,11 +35,11 @@ exports.createBlock = async (req, res) => {
         }
 
         if (shiftIds.length > 0) {
-            const existingShifts = await Slot.find({ _id: { $in: shiftIds } });
+            const existingShifts = await Shift.find({ _id: { $in: shiftIds } });
             if (existingShifts.length !== shiftIds.length) {
                 return res.status(400).json({
                     success: false,
-                    message: "One or more slotIds do not exist in the database",
+                    message: "One or more shiftIds do not exist in the database",
                 });
             }
         }
@@ -74,21 +74,30 @@ exports.createBlock = async (req, res) => {
 
 exports.getAllBlocks = async (req, res) => {
     try {
-        const { restaurantId } = req.query;
+        const { restaurantId, filter } = req.query;
 
         const query = {};
         if (restaurantId) query.restaurantId = restaurantId;
 
+        if (filter === "upcoming") {
+            query.type = "Maintenance";
+        } else if (filter === "ended") {
+            query.type = { $in: ["Closed", "Day Off"] };
+        }
+
         const blocks = await Block.find(query)
             .populate("restaurantId", "name")
             .populate("tableIds", "tableNumber areaName seatCount")
-            .populate("shiftIds", "name startDate endDate startTime endTime");
+            .populate("shiftIds", "name startDate endDate startTime endTime")
+            .sort({ startDate: 1 });
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
+            message: 'Block fetched successfully',
             count: blocks.length,
             data: blocks,
         });
+
     } catch (error) {
         console.error("Error fetching blocks:", error);
         res.status(500).json({
@@ -106,7 +115,7 @@ exports.getBlockById = async (req, res) => {
         const block = await Block.findById(id)
             .populate("restaurantId", "name")
             .populate("tableIds", "tableNumber areaName seatCount")
-            .populate("slotIds", "day shiftName slots");
+            .populate("shiftIds", "name startDate endDate startTime endTime");
 
         if (!block) {
             return res.status(404).json({
@@ -115,7 +124,7 @@ exports.getBlockById = async (req, res) => {
             });
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             data: block,
         });
@@ -139,7 +148,7 @@ exports.updateBlock = async (req, res) => {
             startDate,
             endDate,
             daysActive,
-            slotIds,
+            shiftIds,
             note,
             isActive,
         } = req.body;
@@ -153,7 +162,7 @@ exports.updateBlock = async (req, res) => {
                 startDate,
                 endDate,
                 daysActive,
-                slotIds,
+                shiftIds,
                 note,
                 isActive,
             },
@@ -177,9 +186,9 @@ exports.updateBlock = async (req, res) => {
             }
         }
 
-        if (slotIds.length > 0) {
-            const existingSlots = await Slot.find({ _id: { $in: slotIds } });
-            if (existingSlots.length !== slotIds.length) {
+        if (shiftIds.length > 0) {
+            const existingShifts = await Shift.find({ _id: { $in: shiftIds } });
+            if (existingShifts.length !== shiftIds.length) {
                 return res.status(400).json({
                     success: false,
                     message: "One or more slotIds do not exist in the database",
@@ -187,11 +196,12 @@ exports.updateBlock = async (req, res) => {
             }
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: "Block updated successfully",
             data: updatedBlock,
         });
+
     } catch (error) {
         console.error("Error updating block:", error);
         res.status(500).json({
@@ -214,10 +224,11 @@ exports.deleteBlock = async (req, res) => {
             });
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: "Block deleted successfully",
         });
+
     } catch (error) {
         console.error("Error deleting block:", error);
         res.status(500).json({

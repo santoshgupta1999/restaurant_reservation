@@ -343,7 +343,7 @@ exports.updateRestaurantStatus = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: `Restaurant status updated to "${status}" successfully`
+            message: `Restaurant status updated to ${status} successfully`
             // data: restaurant
         });
 
