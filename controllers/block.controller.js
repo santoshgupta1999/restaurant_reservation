@@ -238,3 +238,45 @@ exports.deleteBlock = async (req, res) => {
         });
     }
 };
+
+exports.getBlocksCalendarView = async (req, res) => {
+    try {
+        const { restaurantId, startDate, endDate } = req.query;
+
+        if (!restaurantId || !startDate || !endDate) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId, startDate, and endDate are required."
+            });
+        }
+
+        const blocks = await Block.find({
+            restaurantId,
+            startDate: { $lte: new Date(endDate) },
+            endDate: { $gte: new Date(startDate) },
+            isActive: true
+        }).sort({ startDate: 1 });
+
+        const groupedBlocks = {};
+        blocks.forEach(block => {
+            const dayKey = block.startDate.toISOString().split("T")[0];
+            if (!groupedBlocks[dayKey]) groupedBlocks[dayKey] = [];
+            groupedBlocks[dayKey].push(block);
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Blocks calendar data fetched successfully.",
+            data: groupedBlocks
+        });
+        
+    } catch (error) {
+        console.error("Error fetching block calendar:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching block calendar view.",
+            error: error.message
+        });
+    }
+};
+

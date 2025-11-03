@@ -18,7 +18,7 @@ exports.register = async (req, res) => {
             message: "Email already registered"
         });
 
-        const allowRoles = ['host', 'marketer', 'manager', 'user']
+        const allowRoles = ['host', 'marketer', 'manager']
         if (!allowRoles.includes(role)) {
             return res.status(400).json({
                 success: false,
@@ -33,7 +33,7 @@ exports.register = async (req, res) => {
             email,
             phone,
             password: hashedPassword,
-            role: role || "user", // Default role is user
+            role: role || "manager", // Default role is user
         });
 
         await newUser.save();

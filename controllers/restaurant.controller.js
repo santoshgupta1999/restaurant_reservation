@@ -540,3 +540,56 @@ exports.getActiveShiftsForToday = async (req, res) => {
         });
     }
 };
+
+exports.getShiftsCalendarView = async (req, res) => {
+    try {
+        const { restaurantId, startDate, endDate } = req.query;
+
+        if (!restaurantId || !startDate || !endDate) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId, startDate, and endDate are required."
+            });
+        }
+
+        const shifts = await Shift.find({
+            restaurantId,
+            $or: [
+                { type: "Recurring" },
+                {
+                    startDate: { $lte: new Date(endDate) },
+                    endDate: { $gte: new Date(startDate) }
+                }
+            ],
+            isActive: true
+        }).sort({ startTime: 1 });
+
+        const groupedShifts = {};
+        shifts.forEach(shift => {
+            if (shift.type === "Recurring") {
+                shift.daysActive.forEach(day => {
+                    if (!groupedShifts[day]) groupedShifts[day] = [];
+                    groupedShifts[day].push(shift);
+                });
+            } else {
+                const dayKey = shift.startDate?.toISOString()?.split("T")[0];
+                if (!groupedShifts[dayKey]) groupedShifts[dayKey] = [];
+                groupedShifts[dayKey].push(shift);
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Shifts calendar data fetched successfully.",
+            data: groupedShifts
+        });
+
+    } catch (error) {
+        console.error("Error fetching shift calendar:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching shift calendar view.",
+            error: error.message
+        });
+    }
+};
