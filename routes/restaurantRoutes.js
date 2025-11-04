@@ -28,6 +28,11 @@ router.get('/tables/available', tableController.getAvailableTables);
 router.put('/table/update/:id', tableController.updateTable);
 router.delete('/table/:id', tableController.deleteTable);
 
+router.post('/mergeTables', tableController.mergeTables);
+router.put('/unmergeTables/:tableId', tableController.unmergeTables);
+router.put('/unmergeSeatedTables', tableController.unmergeSeatedTables);
+router.get('/getAllMergedTables', tableController.getAllMergedTables);
+
 // ------------------------------------------- Review ----------------------------------- //
 
 router.post('/review',

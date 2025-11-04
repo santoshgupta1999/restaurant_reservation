@@ -258,24 +258,39 @@ exports.updateReservationStatus = async (req, res) => {
         const { id } = req.params;
         const { status } = req.body;
 
+        const allowedStatuses = ["Pending", "Confirmed", "Seated", "Canceled", "No-show"];
+
         if (!id || id.length !== 24) {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid reservation ID'
+                message: 'Invalid reservation ID',
             });
         }
 
-        const updated = await Reservation.findByIdAndUpdate(id, { status }, { new: true });
+        if (!status || !allowedStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid status. Allowed values are: ${allowedStatuses.join(', ')}`,
+            });
+        }
+
+        const updated = await Reservation.findByIdAndUpdate(
+            id,
+            { status },
+            { new: true }
+        );
+
         if (!updated) {
             return res.status(404).json({
                 success: false,
-                message: 'Reservation not found'
+                message: 'Reservation not found',
             });
         }
 
         return res.status(200).json({
             success: true,
-            message: `Reservation status updated successfully`,
+            message: `Reservation status updated to ${status} successfully`,
+            data: updated,
         });
 
     } catch (error) {
@@ -283,7 +298,7 @@ exports.updateReservationStatus = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message
+            error: error.message,
         });
     }
 };

@@ -5,38 +5,34 @@ const Shift = require('../models/shift.model');
 
 exports.createTable = async (req, res) => {
     try {
-        const { restaurantId, roomName, tableNumber, capacity, position } = req.body;
+        const tableData = req.body;
 
-        const exists = await Table.findOne({ restaurantId, tableNumber });
-        if (exists) {
+        const existing = await Table.findOne({
+            restaurantId: tableData.restaurantId,
+            tableNumber: tableData.tableNumber,
+        });
+
+        if (existing) {
             return res.status(400).json({
                 success: false,
-                message: 'Table number already exists for this restaurant.'
+                message: "Table number already exists for this restaurant.",
             });
         }
 
-        const table = new Table({
-            restaurantId,
-            roomName,
-            tableNumber,
-            capacity,
-            position
-        });
+        const newTable = await Table.create(tableData);
 
-        await table.save();
-
-        res.status(201).json({
+        return res.status(201).json({
             success: true,
-            message: 'Table created successfully.',
-            data: table
+            message: "Table created successfully.",
+            data: newTable,
         });
 
     } catch (error) {
-        console.error('Error creating table:', error);
+        console.error("Error creating table:", error);
         res.status(500).json({
             success: false,
-            message: 'Error creating table.',
-            error: error.message
+            message: "Error creating table.",
+            error: error.message,
         });
     }
 };
@@ -44,22 +40,25 @@ exports.createTable = async (req, res) => {
 exports.getAllTables = async (req, res) => {
     try {
         const { restaurantId } = req.query;
-        const filter = restaurantId ? { restaurantId } : {};
 
-        const tables = await Table.find(filter).populate('restaurantId', 'name email phone');
+        const filter = {};
+        if (restaurantId) filter.restaurantId = restaurantId;
 
-        res.status(200).json({
+        const tables = await Table.find(filter).populate("joinedWith", "tableNumber");
+
+        return res.status(200).json({
             success: true,
-            message: 'Tables fetched successfully.',
+            message: "Tables fetched successfully.",
             count: tables.length,
-            data: tables
+            data: tables,
         });
+
     } catch (error) {
-        console.error('Error fetching tables:', error);
+        console.error("Error fetching tables:", error);
         res.status(500).json({
             success: false,
-            message: 'Error fetching tables.',
-            error: error.message
+            message: "Error fetching tables.",
+            error: error.message,
         });
     }
 };
@@ -95,46 +94,47 @@ exports.getTableById = async (req, res) => {
 exports.updateTable = async (req, res) => {
     try {
         const { id } = req.params;
-        const { restaurantId, roomName, tableNumber, capacity, status, position } = req.body;
+        const updateData = req.body;
 
-        const duplicate = await Table.findOne({
-            restaurantId,
-            tableNumber,
-            _id: { $ne: id }
-        });
-
-        if (duplicate) {
-            return res.status(400).json({
-                success: false,
-                message: 'Another table with this number already exists in the restaurant.'
-            });
-        }
-
-        const updated = await Table.findByIdAndUpdate(
-            id,
-            { restaurantId, roomName, tableNumber, capacity, status, position },
-            { new: true, runValidators: true }
-        );
-
-        if (!updated) {
+        const table = await Table.findById(id);
+        if (!table) {
             return res.status(404).json({
                 success: false,
-                message: 'Table not found.'
+                message: "Table not found.",
             });
         }
 
-        res.status(200).json({
+        if (updateData.tableNumber) {
+            const duplicate = await Table.findOne({
+                restaurantId: table.restaurantId,
+                tableNumber: updateData.tableNumber,
+                _id: { $ne: id },
+            });
+            if (duplicate) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Table number already exists for this restaurant.",
+                });
+            }
+        }
+
+        const updatedTable = await Table.findByIdAndUpdate(id, updateData, {
+            new: true,
+            runValidators: true,
+        });
+
+        return res.status(200).json({
             success: true,
-            message: 'Table updated successfully.',
-            data: updated
+            message: "Table updated successfully.",
+            data: updatedTable,
         });
 
     } catch (error) {
-        console.error('Error updating table:', error);
+        console.error("Error updating table:", error);
         res.status(500).json({
             success: false,
-            message: 'Error updating table.',
-            error: error.message
+            message: "Error updating table.",
+            error: error.message,
         });
     }
 };
@@ -151,7 +151,7 @@ exports.deleteTable = async (req, res) => {
             });
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: 'Table deleted successfully.'
         });
@@ -238,6 +238,210 @@ exports.getAvailableTables = async (req, res) => {
             success: false,
             message: "Internal server error.",
             error: error.message,
+        });
+    }
+};
+
+exports.mergeTables = async (req, res) => {
+    try {
+        const { primaryTableId, tableIds } = req.body;
+
+        if (!primaryTableId || !Array.isArray(tableIds) || !tableIds.length) {
+            return res.status(400).json({
+                success: false,
+                message: "primaryTableId and tableIds (array) are required."
+            });
+        }
+
+        // Fetch primary and all tables
+        const primary = await Table.findById(primaryTableId);
+        const others = await Table.find({ _id: { $in: tableIds } });
+
+        if (!primary || !others.length) {
+            return res.status(404).json({
+                success: false,
+                message: "Invalid table IDs."
+            });
+        }
+
+        // Check restaurant consistency
+        const allSameRestaurant = others.every(
+            (t) => t.restaurantId.toString() === primary.restaurantId.toString()
+        );
+        if (!allSameRestaurant) {
+            return res.status(400).json({
+                success: false,
+                message: "All tables must belong to the same restaurant."
+            });
+        }
+
+        // Update tables as joined
+        const allIds = [primaryTableId, ...tableIds];
+        await Table.updateMany(
+            { _id: { $in: allIds } },
+            { $set: { isJoined: true, joinedWith: allIds } }
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Tables merged successfully.",
+            data: {
+                primaryTableId,
+                mergedTables: allIds
+            }
+        });
+
+    } catch (error) {
+        console.error("Error merging tables:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error merging tables.",
+            error: error.message
+        });
+    }
+};
+
+exports.unmergeTables = async (req, res) => {
+    try {
+        const { tableId } = req.params;
+
+        if (!tableId) {
+            return res.status(400).json({
+                success: false,
+                message: "tableId is required."
+            });
+        }
+
+        const table = await Table.findById(tableId);
+        if (!table || !table.isJoined) {
+            return res.status(404).json({
+                success: false,
+                message: "Table not found or not part of a merged group."
+            });
+        }
+
+        const joinedIds = table.joinedWith;
+
+        // Reset all joined tables
+        await Table.updateMany(
+            { _id: { $in: joinedIds } },
+            { $set: { isJoined: false, joinedWith: [] } }
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Tables unmerged successfully.",
+            data: joinedIds
+        });
+
+    } catch (error) {
+        console.error("Error unmerging tables:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error unmerging tables.",
+            error: error.message
+        });
+    }
+};
+
+exports.unmergeSeatedTables = async (req, res) => {
+    try {
+        const { tableId, force } = req.body; // force = true to override
+
+        if (!tableId) {
+            return res.status(400).json({
+                success: false,
+                message: "tableId is required."
+            });
+        }
+
+        const table = await Table.findById(tableId);
+        if (!table || !table.isJoined) {
+            return res.status(404).json({
+                success: false,
+                message: "Table not found or not part of a merged group."
+            });
+        }
+
+        // Check if any table is occupied
+        const joinedTables = await Table.find({ _id: { $in: table.joinedWith } });
+        const seatedTables = joinedTables.filter((t) => t.status === "Seated");
+
+        if (seatedTables.length && !force) {
+            return res.status(400).json({
+                success: false,
+                message: "Some tables are currently seated. Set force=true to override."
+            });
+        }
+
+        // Unmerge all
+        await Table.updateMany(
+            { _id: { $in: table.joinedWith } },
+            { $set: { isJoined: false, joinedWith: [] } }
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Tables unmerged successfully (seated handled).",
+            data: table.joinedWith
+        });
+
+    } catch (error) {
+        console.error("Error unmerging seated tables:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error unmerging seated tables.",
+            error: error.message
+        });
+    }
+};
+
+exports.getAllMergedTables = async (req, res) => {
+    try {
+        const { restaurantId } = req.query;
+
+        const filter = { isJoined: true };
+        if (restaurantId) filter.restaurantId = restaurantId;
+
+        const mergedTables = await Table.find(filter)
+            .populate("restaurantId", "name address")
+            .populate("joinedWith", "tableNumber capacity roomName")
+            .sort({ updatedAt: -1 });
+
+        if (!mergedTables.length) {
+            return res.status(404).json({
+                success: false,
+                message: "No merged tables found."
+            });
+        }
+
+        // Optional: Group by merged cluster (unique set of joined tables)
+        const grouped = [];
+        const seen = new Set();
+
+        mergedTables.forEach((table) => {
+            const key = table.joinedWith.map((id) => id.toString()).sort().join(",");
+            if (!seen.has(key)) {
+                grouped.push({
+                    mainTable: table,
+                    mergedGroup: table.joinedWith
+                });
+                seen.add(key);
+            }
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Merged tables fetched successfully.",
+            totalGroups: grouped.length,
+            data: grouped
+        });
+    } catch (error) {
+        console.error("Error fetching merged tables:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching merged tables.",
+            error: error.message
         });
     }
 };
