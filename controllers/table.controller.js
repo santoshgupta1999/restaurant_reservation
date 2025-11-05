@@ -445,3 +445,135 @@ exports.getAllMergedTables = async (req, res) => {
         });
     }
 };
+
+exports.lockTable = async (req, res) => {
+    try {
+        const { tableId } = req.params;
+        const { reason, force } = req.body;
+        const userId = req.user._id;
+
+        if (!tableId) {
+            return res.status(400).json({
+                success: false,
+                message: "Table Id is required"
+            });
+        }
+
+        const table = await Table.findById(tableId);
+        if (!table) {
+            return res.status(404).json({
+                success: false,
+                message: "Table not found"
+            });
+        }
+
+        if (["Reserved", "Seated"].includes(table.status) && !force) {
+            return res.status(400).json({
+                success: false,
+                message: `Table is currently ${table.status} Use 'force': true to override.`
+            });
+        }
+
+        table.status = "OutOfService";
+        table.lockReason = reason || "Temporarily unavailable";
+        table.lockedBy = userId;
+
+        await table.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Table locked successfully",
+            data: {
+                id: table._id,
+                status: table.status,
+                lockReason: table.lockReason,
+                lockedBy: table.lockedBy
+            }
+        });
+
+    } catch (error) {
+        console.error('Error while locks the tables', error);
+        res.status(500).json({
+            success: false,
+            message: "Error while locks the tables",
+            Error: error.message
+        });
+    }
+};
+
+exports.unlockTable = async (req, res) => {
+    try {
+        const { tableId } = req.params;
+
+        if (!tableId) {
+            return res.status(400).json({
+                success: false,
+                message: "tableId is required."
+            });
+        }
+
+        const table = await Table.findById(tableId);
+        if (!table) {
+            return res.status(404).json({
+                success: false,
+                message: "Table not found."
+            });
+        }
+
+        if (table.status !== "OutOfService") {
+            return res.status(400).json({
+                success: false,
+                message: "Table is not locked or already available."
+            });
+        }
+
+        table.status = "Available";
+        table.lockReason = null;
+        table.lockedBy = null;
+
+        await table.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Table unlocked successfully.",
+            data: { id: table._id, status: table.status }
+        });
+
+    } catch (error) {
+        console.error("Error unlocking table:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error unlocking table.",
+            error: error.message
+        });
+    }
+};
+
+exports.getAllLockedTables = async (req, res) => {
+    try {
+        const { restaurantId } = req.query;
+
+        const filter = { status: "OutOfService" };
+        if (restaurantId) filter.restaurantId = restaurantId;
+
+        const lockedTables = await Table.find(filter)
+            .populate("restaurantId", "name address")
+            .populate("lockedBy", "name email role")
+            .sort({ updatedAt: -1 });
+
+        return res.status(200).json({
+            success: true,
+            message: "Locked tables fetched successfully.",
+            count: lockedTables.length,
+            data: lockedTables
+        });
+
+    } catch (error) {
+        console.error("Error fetching locked tables:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching locked tables.",
+            error: error.message
+        });
+    }
+};

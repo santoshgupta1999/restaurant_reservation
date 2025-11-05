@@ -71,7 +71,11 @@ const tableSchema = new mongoose.Schema(
             type: Number,
             default: 0,
         },
-        lockedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+        lockedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            default: null
+        },
         lockReason: {
             type: String,
             default: null
