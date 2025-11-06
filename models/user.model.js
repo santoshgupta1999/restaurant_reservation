@@ -25,6 +25,17 @@ const UserSchema = new mongoose.Schema(
             type: String,
             default: null,
         },
+        restaurantId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Restaurant"
+        },
+        isActive: {
+            type: Boolean,
+            default: true
+        },
+        lastLogin: {
+            type: Date
+        },
     },
     { timestamps: true }
 );

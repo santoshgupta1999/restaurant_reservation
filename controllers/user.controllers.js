@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/user.model.js");
+const Restaurant = require('../models/restaurant.model.js');
 const UserOtp = require('../models/userOtp.js');
 const sendMail = require('../utils/mailer.js');
 const path = require('path');
@@ -10,20 +11,32 @@ const BlacklistToken = require("../models/blacklistToken.model");
 
 exports.register = async (req, res) => {
     try {
-        const { name, email, phone, password, role } = req.body;
+        const { name, email, phone, password, role, restaurantId } = req.body;
 
         const existingUser = await User.findOne({ email });
-        if (existingUser) return res.status(400).json({
-            success: false,
-            message: "Email already registered"
-        });
-
-        const allowRoles = ['host', 'marketer', 'manager']
-        if (!allowRoles.includes(role)) {
+        if (existingUser) {
             return res.status(400).json({
                 success: false,
-                message: "Please enter a valid role."
-            })
+                message: "Email already registered",
+            });
+        }
+
+        const allowedRoles = ["admin", "host", "marketer", "manager"];
+        if (role && !allowedRoles.includes(role)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid role. Allowed roles: admin, host, marketer, manager",
+            });
+        }
+
+        if (restaurantId) {
+            const restaurantExists = await Restaurant.findById(restaurantId);
+            if (!restaurantExists) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Invalid restaurant ID. Restaurant not found.",
+                });
+            }
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -33,20 +46,26 @@ exports.register = async (req, res) => {
             email,
             phone,
             password: hashedPassword,
-            role: role || "manager", // Default role is user
+            role: role || "manager",
+            restaurantId: restaurantId || null,
         });
 
         await newUser.save();
+
         return res.status(201).json({
             success: true,
             message: "User registered successfully",
-            Id: newUser.id
+            userId: newUser._id,
+            role: newUser.role,
+            restaurantId: newUser.restaurantId
         });
-    } catch (err) {
-        console.log('register Error', err);
-        res.status(500).json({
+
+    } catch (error) {
+        console.error("Register Error:", error);
+        return res.status(500).json({
             success: false,
-            error: err.message
+            message: "Internal Server Error",
+            error: error.message,
         });
     }
 };
@@ -56,131 +75,174 @@ exports.login = async (req, res) => {
         const { email, password } = req.body;
 
         const user = await User.findOne({ email });
-        if (!user) return res.status(400).json({
-            success: false,
-            message: "Invalid email"
-        });
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found. Please register first.",
+            });
+        }
+
+        if (!user.isActive) {
+            return res.status(403).json({
+                success: false,
+                message: "Account is inactive. Contact admin.",
+            });
+        }
 
         const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) return res.status(400).json({
-            success: false,
-            message: "Invalid password"
-        });
+        if (!isMatch) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid password.",
+            });
+        }
+
+        user.lastLogin = new Date();
+        await user.save();
 
         const token = jwt.sign(
-            { id: user._id, role: user.role },
-            process.env.JWT_SECRET,
+            {
+                id: user._id,
+                role: user.role,
+                restaurantId: user.restaurantId || null,
+            },
+            process.env.JWT_SECRET || "MY_SUPER_SECRET_KEY",
             { expiresIn: "30d" }
         );
+
         return res.status(200).json({
             success: true,
-            message: `${user.role} Login successfully`,
+            message: "Login successfully",
             token,
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            role: user.role
+            data: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                restaurantId: user.restaurantId,
+            },
         });
 
-    } catch (err) {
-        res.status(500).json({
+    } catch (error) {
+        console.error("Login Error:", error);
+        return res.status(500).json({
             success: false,
-            error: err.message
+            message: "Internal Server Error",
+            error: error.message,
         });
     }
 };
 
 exports.getProfile = async (req, res) => {
     try {
-        const user = req.user;
+        const userId = req.user?.id;
 
-        if (!user) {
-            return res.status(404).json({
+        if (!userId) {
+            return res.status(401).json({
                 success: false,
-                message: 'User not found'
+                message: "Unauthorized: Invalid token or user not found.",
             });
         }
 
+        const user = await User.findById(userId).select("-password");
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found.",
+            });
+        }
+
+        const imageUrl = user.profileImage
+            ? `${req.protocol}://${req.get("host")}/uploads/users/${user.profileImage}`
+            : null;
+
         return res.status(200).json({
             success: true,
-            message: 'Profile fetched successfully',
+            message: "Profile fetched successfully",
             data: {
-                Id: user.id,
+                id: user._id,
                 name: user.name,
                 email: user.email,
                 phone: user.phone,
                 role: user.role,
-                imageUrl: `${req.protocol}://${req.get('host')}/uploads/users/${user.profileImage}`
-            }
+                isActive: user.isActive,
+                lastLogin: user.lastLogin ? user.lastLogin.toISOString() : null,
+                imageUrl,
+            },
         });
 
     } catch (err) {
-        console.error('Error fetching profile', err);
-        res.status(500).json({
+        console.error("Error fetching profile:", err);
+        return res.status(500).json({
             success: false,
-            message: 'Error fetching profile',
-            error: err.message
+            message: "Error fetching profile",
+            error: err.message,
         });
     }
 };
 
 exports.updateProfile = async (req, res) => {
     try {
-        const userId = req.user?._id;
-        const user = await User.findById(userId);
-
-        if (!user) {
-            return res.status(404).json({
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({
                 success: false,
-                message: 'User not found'
+                message: "Unauthorized: Invalid token or user not found.",
             });
         }
 
-        if (req.body.name) {
-            user.name = req.body.name;
+        const { name, phone, email } = req.body;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found.",
+            });
         }
 
-        if (req.body.email) {
-            const emailExists = await User.findOne({ email: req.body.email, _id: { $ne: userId } });
-            if (emailExists) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Email already in use by another user"
-                });
-            }
-            user.email = req.body.email;
-        }
-
+        let newImage = user.profileImage;
         if (req.file) {
-            if (user.profileImage) {
-                const oldPath = path.join(__dirname, '../uploads/users/', user.profileImage);
-                if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-            }
+            newImage = req.file.filename;
 
-            user.profileImage = req.file.filename;
+            if (user.profileImage) {
+                const oldPath = path.join(__dirname, "../uploads/users", user.profileImage);
+                if (fs.existsSync(oldPath)) {
+                    fs.unlinkSync(oldPath);
+                }
+            }
         }
+
+        user.name = name || user.name;
+        user.phone = phone || user.phone;
+        user.email = email || user.email;
+        user.profileImage = newImage;
 
         await user.save();
 
+        const imageUrl = user.profileImage
+            ? `${req.protocol}://${req.get("host")}/uploads/users/${user.profileImage}`
+            : null;
+
         return res.status(200).json({
             success: true,
-            message: 'Profile updated successfully',
+            message: "Profile updated successfully",
             data: {
                 id: user._id,
                 name: user.name,
                 email: user.email,
-                imageUrl: user.profileImage
-                    ? `${req.protocol}://${req.get('host')}/uploads/users/${user.profileImage}`
-                    : null
-            }
+                phone: user.phone,
+                role: user.role,
+                imageUrl,
+            },
         });
 
     } catch (error) {
-        console.error('Error updating user profile:', error);
-        res.status(500).json({
+        console.error("Error updating profile:", error);
+        return res.status(500).json({
             success: false,
-            message: "Error updating user profile",
-            error: error.message
+            message: "Error updating profile",
+            error: error.message,
         });
     }
 };
@@ -447,6 +509,100 @@ exports.resetPassword = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Server error during reset password',
+            error: error.message,
+        });
+    }
+};
+
+exports.getAllActiveUser = async (req, res) => {
+    try {
+        const { role, restaurantId, page = 1, limit = 10, sortBy = "createdAt", order = "desc" } = req.query;
+
+        const query = { isActive: true };
+
+        if (role) query.role = role;
+        if (restaurantId) query.restaurantId = restaurantId;
+
+        const skip = (page - 1) * limit;
+        const sortOrder = order === "asc" ? 1 : -1;
+
+        const users = await User.find(query)
+            .select("-password")
+            .populate("restaurantId", "name email phone address")
+            .sort({ [sortBy]: sortOrder })
+            .skip(skip)
+            .limit(parseInt(limit));
+
+        const total = await User.countDocuments(query);
+
+        if (!users.length) {
+            return res.status(404).json({
+                success: false,
+                message: "No active users found.",
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Active users fetched successfully.",
+            count: users.length,
+            total,
+            currentPage: parseInt(page),
+            totalPages: Math.ceil(total / limit),
+            data: users,
+        });
+    } catch (error) {
+        console.error("Error fetching active users:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching active users.",
+            error: error.message,
+        });
+    }
+};
+
+exports.updateUserStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { isActive } = req.body;
+
+        if (typeof isActive !== "boolean") {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid input. 'isActive' must be a boolean (true or false).",
+            });
+        }
+
+        const updatedUser = await User.findByIdAndUpdate(
+            id,
+            { isActive },
+            { new: true, runValidators: true }
+        ).select("-password");
+
+        if (!updatedUser) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found.",
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `User has been ${isActive ? "activated" : "deactivated"} successfully.`,
+            data: {
+                id: updatedUser._id,
+                name: updatedUser.name,
+                email: updatedUser.email,
+                role: updatedUser.role,
+                isActive: updatedUser.isActive,
+            },
+        });
+
+    } catch (error) {
+        console.error("Error updating user status:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error updating user status.",
             error: error.message,
         });
     }
