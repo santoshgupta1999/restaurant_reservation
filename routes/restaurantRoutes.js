@@ -36,6 +36,8 @@ router.get('/getAllMergedTables', tableController.getAllMergedTables);
 router.put('/lockTable/:tableId', verifyToken, tableController.lockTable);
 router.put('/unlockTable/:tableId', tableController.unlockTable);
 router.get('/getAllLockedTables', tableController.getAllLockedTables);
+
+router.put('/updateTableStatus/:id', tableController.updateTableStatus);
 // ------------------------------------------- Review ----------------------------------- //
 
 router.post('/review',

@@ -10,7 +10,10 @@ const {
     verifyOtp,
     resetPassword,
     getAllActiveUser,
-    updateUserStatus
+    updateUserStatus,
+    getAllUsers,
+    getUserById,
+    deleteUser
 } = require("../controllers/user.controllers.js");
 
 const { registerValidator, loginValidator, updateProfileValidator, } = require("../validators/userValidation.js");
@@ -32,6 +35,9 @@ router.post('/verify-otp', verifyToken, verifyOtp);
 router.post('/reset-password', verifyToken, resetPassword);
 
 router.get('/all_active', getAllActiveUser);
+router.get('/getAllUsers', getAllUsers);
+router.get('/getUserById/:id', getUserById);
+router.delete('/deleteUser/:id', deleteUser);
 router.put('/updateUserStatus/:id', updateUserStatus);
 
 module.exports = router;

@@ -258,7 +258,7 @@ exports.updateReservationStatus = async (req, res) => {
         const { id } = req.params;
         const { status } = req.body;
 
-        const allowedStatuses = ["Pending", "Confirmed", "Seated", "Canceled", "No-show"];
+        const allowedStatuses = ["Pending", "Confirmed", "Seated", "Canceled", "No-show", "Finished"];
 
         if (!id || id.length !== 24) {
             return res.status(400).json({

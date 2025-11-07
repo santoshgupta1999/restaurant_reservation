@@ -607,3 +607,92 @@ exports.updateUserStatus = async (req, res) => {
         });
     }
 };
+
+exports.getAllUsers = async (req, res) => {
+    try {
+        const { role, page = 1, limit = 10 } = req.query;
+        const query = {};
+
+        if (role) query.role = role;
+        // if (isActive !== undefined) query.isActive = isActive === "true";
+
+        const skip = (page - 1) * limit;
+
+        const users = await User.find(query)
+            .select("-password")
+            .populate("restaurantId", "name email phone")
+            .skip(skip)
+            .limit(parseInt(limit))
+            .sort({ createdAt: -1 });
+
+        const total = await User.countDocuments(query);
+
+        return res.status(200).json({
+            success: true,
+            message: "Users fetched successfully",
+            count: users.length,
+            total,
+            data: users,
+        });
+
+    } catch (error) {
+        console.error("Error fetching users:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching users",
+            error: error.message
+        });
+    }
+};
+
+exports.getUserById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user = await User.findById(id).select("-password")
+            .populate("restaurantId", "name email phone");
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "User fetched successfully",
+            data: user,
+        });
+
+    } catch (error) {
+        console.error("Error fetching user:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching user",
+            error: error.message
+        });
+    }
+};
+
+exports.deleteUser = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const deleted = await User.findByIdAndDelete(id);
+        if (!deleted) return res.status(404).json({
+            success: false,
+            message: "User not found"
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "User deleted successfully"
+        });
+
+    } catch (error) {
+        console.error("Error deleting user:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error deleting user",
+            error: error.message
+        });
+    }
+};

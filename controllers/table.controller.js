@@ -577,3 +577,52 @@ exports.getAllLockedTables = async (req, res) => {
         });
     }
 };
+
+exports.updateTableStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        const allowedStatuses = ["Available", "Reserved", "Seated", "OutOfService"];
+        if (!allowedStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid status. Allowed values: ${allowedStatuses.join(", ")}`
+            });
+        }
+
+        const updatedTable = await Table.findByIdAndUpdate(
+            id,
+            { status },
+            { new: true, runValidators: true }
+        ).populate("restaurantId", "name email phone");
+
+        if (!updatedTable) {
+            return res.status(404).json({
+                success: false,
+                message: "Table not found."
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Table status updated successfully to ${status}.`,
+            data: {
+                id: updatedTable._id,
+                tableNumber: updatedTable.tableNumber,
+                roomName: updatedTable.roomName,
+                capacity: updatedTable.capacity,
+                status: updatedTable.status,
+                restaurant: updatedTable.restaurantId
+            }
+        });
+
+    } catch (error) {
+        console.error("Error updating table status:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error updating table status.",
+            error: error.message
+        });
+    }
+};
