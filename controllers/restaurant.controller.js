@@ -593,3 +593,52 @@ exports.getShiftsCalendarView = async (req, res) => {
         });
     }
 };
+
+exports.updateShiftStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { isActive } = req.body;
+
+        if (typeof isActive !== "boolean") {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid input. 'isActive' must be true or false."
+            });
+        }
+
+        const updatedShift = await Shift.findByIdAndUpdate(
+            id,
+            { isActive },
+            { new: true, runValidators: true }
+        ).populate("restaurantId", "name email phone address");
+
+        if (!updatedShift) {
+            return res.status(404).json({
+                success: false,
+                message: "Shift not found."
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Shift has been ${isActive ? "activated" : "deactivated"} successfully.`,
+            data: {
+                id: updatedShift._id,
+                name: updatedShift.name,
+                restaurantId: updatedShift.restaurantId,
+                type: updatedShift.type,
+                startTime: updatedShift.startTime,
+                endTime: updatedShift.endTime,
+                isActive: updatedShift.isActive
+            }
+        });
+
+    } catch (error) {
+        console.error("Error updating shift status:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error updating shift status.",
+            error: error.message
+        });
+    }
+};

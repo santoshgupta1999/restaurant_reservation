@@ -3,12 +3,12 @@ const router = express.Router();
 
 const slotController = require('../controllers/slot.controller');
 const tableController = require('../controllers/table.controller');
-const reviewController = require('../controllers/review.controller');
+const feedbackController = require('../controllers/feedback.controller');
 const blockController = require('../controllers/block.controller');
 const restaurantController = require('../controllers/restaurant.controller');
 const { verifyToken, requireRole } = require('../middlewares/auth.middleware');
 const upload = require('../middlewares/upload.middleware');
-const { reviewValidator, checkDuplicateReview } = require('../validators/reviewValidation');
+const { feedbackValidator, updateFeedbackValidator } = require('../validators/feedbackValidation');
 const { validate } = require('../middlewares/validationResultHandler');
 const { blockValidator } = require('../validators/blockValidator');
 const { shiftValidator } = require('../validators/shiftValidator');
@@ -38,17 +38,15 @@ router.put('/unlockTable/:tableId', tableController.unlockTable);
 router.get('/getAllLockedTables', tableController.getAllLockedTables);
 
 router.put('/updateTableStatus/:id', tableController.updateTableStatus);
-// ------------------------------------------- Review ----------------------------------- //
+// ------------------------------------------- Feedback ----------------------------------- //
 
-router.post('/review',
-    verifyToken, requireRole('user'),
-    reviewValidator, checkDuplicateReview,
-    validate,
-    reviewController.createReview
-);
-router.get('/review', verifyToken, requireRole('user'), reviewController.getReviews);
-router.get('/admin/reviews', verifyToken, requireRole('admin'), reviewController.getAllReviewsByAdmin);
-router.get('/avg_rating/:restaurantId', verifyToken, requireRole('admin'), reviewController.getAverageRating);
+router.post('/createFeedback', feedbackValidator, validate, feedbackController.createFeedback);
+router.get('/getAllFeedback', feedbackController.getAllFeedback);
+router.get('/getFeedbackById/:id', feedbackController.getFeedbackById);
+router.put("/updateFeedback/:id", updateFeedbackValidator, validate, feedbackController.updateFeedback);
+router.delete('/deleteFeedback/:id', feedbackController.deleteFeedback);
+router.get('/getFeedbackByRestaurant/:id', feedbackController.getFeedbackByRestaurant);
+router.get('/getAverageRating/:restaurantId', feedbackController.getAverageRatingByRestaurant);
 
 
 // ------------------------------------------- Block ------------------------------------- //
@@ -69,5 +67,6 @@ router.put('/shift/:id', shiftValidator, validate, restaurantController.updateSh
 router.delete('/shift/:id', restaurantController.deleteShift);
 router.get('/shift/active/today', restaurantController.getActiveShiftsForToday);
 router.get('/getShiftsCalendarView', restaurantController.getShiftsCalendarView);
+router.put("/updateShiftStatus/:id", restaurantController.updateShiftStatus);
 
 module.exports = router;
