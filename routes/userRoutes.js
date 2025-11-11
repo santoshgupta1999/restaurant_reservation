@@ -19,6 +19,7 @@ const {
 const { registerValidator, loginValidator, updateProfileValidator, } = require("../validators/userValidation.js");
 const { validate } = require('../middlewares/validationResultHandler.js');
 const { verifyToken } = require("../middlewares/auth.middleware.js");
+const notificationController = require('../controllers/notification.controller.js');
 const upload = require('../middlewares/upload.middleware.js');
 const router = express.Router();
 
@@ -39,5 +40,8 @@ router.get('/getAllUsers', getAllUsers);
 router.get('/getUserById/:id', getUserById);
 router.delete('/deleteUser/:id', deleteUser);
 router.put('/updateUserStatus/:id', updateUserStatus);
+
+router.post('/createNotification', notificationController.createNotification);
+router.get('/getNotifications', notificationController.getNotifications);
 
 module.exports = router;
