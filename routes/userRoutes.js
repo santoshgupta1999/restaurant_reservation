@@ -43,5 +43,8 @@ router.put('/updateUserStatus/:id', updateUserStatus);
 
 router.post('/createNotification', notificationController.createNotification);
 router.get('/getNotifications', notificationController.getNotifications);
+router.put('/updateNotificationStatus/:id', notificationController.updateNotificationStatus);
+router.delete('/deleteNotification/:id', notificationController.deleteNotification);
+router.put('/markAllAsRead', verifyToken, notificationController.markAllAsRead);
 
 module.exports = router;

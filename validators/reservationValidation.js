@@ -9,11 +9,12 @@ exports.reservationValidator = [
         .notEmpty().withMessage("Shift ID is required.")
         .isMongoId().withMessage("Invalid Shift ID."),
 
-    body("guestName").notEmpty().withMessage("Guest name is required."),
+    body("firstName").notEmpty().withMessage("first name is required."),
+    body("lastName").notEmpty().withMessage("last name is required."),
     body("guestEmail").isEmail().withMessage("Invalid email."),
     body("guestPhone")
         .notEmpty().withMessage("Phone number is required."),
-        // .matches(/^[0-9]{10}$/).withMessage("Phone must be 10 digits."),
+    // .matches(/^[0-9]{10}$/).withMessage("Phone must be 10 digits."),
 
     body("date")
         .notEmpty().withMessage("Reservation date is required.")

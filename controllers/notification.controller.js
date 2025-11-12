@@ -73,3 +73,98 @@ exports.getNotifications = async (req, res) => {
         });
     }
 };
+
+exports.updateNotificationStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { isRead } = req.body;
+
+        const updateNotification = await Notification.findByIdAndUpdate(
+            id,
+            { isRead },
+            { new: true }
+        );
+        if (!updateNotification) {
+            return res.status(404).json({
+                success: false,
+                message: 'Notification not found'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Notificatioin marked as ${isRead ? "read" : "unread"}.`,
+            data: updateNotification
+        });
+
+    } catch (error) {
+        console.error('Error while updating notification', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error while updating notification'
+        });
+    }
+};
+
+exports.deleteNotification = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const deleted = await Notification.findByIdAndDelete(id);
+
+        if (!deleted) {
+            return res.status(404).json({
+                success: false,
+                message: 'Notification not found'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Notification deleted successfully'
+        });
+
+    } catch (error) {
+        console.error('Error while deleting notification', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error while deleting notification',
+            Error: error.message
+        });
+    }
+};
+
+exports.markAllAsRead = async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        const unreadCount = await Notification.countDocuments({
+            recipientId: userId,
+            isRead: false
+        });
+
+        if (unreadCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No unread notifications found.'
+            });
+        }
+
+        await Notification.updateMany(
+            { recipientId: userId, isRead: false },
+            { $set: { isRead: true } }
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: `${unreadCount} notifications marked as read`
+        });
+
+    } catch (error) {
+        console.error('Error while mark all notification as read', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error while mark all notification as read',
+            Error: error.message
+        });
+    }
+};
