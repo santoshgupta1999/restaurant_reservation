@@ -381,26 +381,37 @@ exports.createShift = async (req, res) => {
 
 exports.getAllShift = async (req, res) => {
     try {
-        const { restaurantId } = req.query;
+        const { restaurantId, type } = req.query;
         const query = {};
 
         if (restaurantId) query.restaurantId = restaurantId;
 
-        const shifts = await Shift.find(query).populate("restaurantId", "name email phone");
+        if (type) query.type = type;
+
+        const shifts = await Shift.find(query)
+            .populate("restaurantId", "name email phone address")
+            .sort({ createdAt: -1 });
+
+        if (!shifts.length) {
+            return res.status(404).json({
+                success: false,
+                message: "No shifts found for the given filters.",
+            });
+        }
 
         res.status(200).json({
             success: true,
-            message: 'Shift fetched successfully',
+            message: "Shifts fetched successfully.",
             count: shifts.length,
-            data: shifts
+            data: shifts,
         });
 
     } catch (error) {
         console.error("Error fetching shifts:", error);
         res.status(500).json({
             success: false,
-            message: "Internal server error",
-            error: error.message
+            message: "Internal server error.",
+            error: error.message,
         });
     }
 };
@@ -409,7 +420,7 @@ exports.getShiftById = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const shift = await Shift.findById(id).populate("restaurantId", "name");
+        const shift = await Shift.findById(id).populate("restaurantId", "name email phone");
         if (!shift) {
             return res.status(404).json({
                 success: false,

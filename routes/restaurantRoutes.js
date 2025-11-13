@@ -57,6 +57,7 @@ router.get('/block/:id', blockController.getBlockById);
 router.put('/block/:id', blockValidator, validate, blockController.updateBlock);
 router.delete('/block/:id', blockController.deleteBlock);
 router.get('/getBlocksCalendarView', blockController.getBlocksCalendarView);
+router.put('/updateBlockStatus/:id', blockController.updateBlockStatus);
 
 // ------------------------------------------ Shift -------------------------------------- //
 

@@ -269,7 +269,7 @@ exports.getBlocksCalendarView = async (req, res) => {
             message: "Blocks calendar data fetched successfully.",
             data: groupedBlocks
         });
-        
+
     } catch (error) {
         console.error("Error fetching block calendar:", error);
         res.status(500).json({
@@ -280,3 +280,46 @@ exports.getBlocksCalendarView = async (req, res) => {
     }
 };
 
+exports.updateBlockStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { isActive } = req.body;
+
+        if (typeof isActive !== "boolean") {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid input. 'isActive' must be true or false."
+            });
+        }
+
+        const updatedBlock = await Block.findByIdAndUpdate(
+            id,
+            { isActive },
+            { new: true, runValidators: true }
+        )
+            .populate("restaurantId", "name email phone address")
+            .populate("tableIds", "tableNumber roomName")
+            .populate("shiftIds", "name startDate endDate");
+
+        if (!updatedBlock) {
+            return res.status(404).json({
+                success: false,
+                message: "Block not found."
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Block has been ${isActive ? "activated" : "deactivated"} successfully.`,
+            data: updatedBlock
+        });
+
+    } catch (error) {
+        console.error("Error updating block status:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error updating block status.",
+            error: error.message
+        });
+    }
+};

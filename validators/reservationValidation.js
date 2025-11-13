@@ -25,5 +25,11 @@ exports.reservationValidator = [
         .matches(/^([01]\d|2[0-3]):([0-5]\d)$/).withMessage("Invalid time format (HH:mm)."),
 
     body("partySize")
-        .isInt({ min: 1 }).withMessage("Party size must be at least 1.")
+        .isInt({ min: 1 }).withMessage("Party size must be at least 1."),
+    
+    body("source")
+        .notEmpty()
+        .withMessage("Source is required.")
+        .isIn(["Online", "Walk-in", "Phone"])
+        .withMessage("Source name must be one of: Online, Walk-in, Phone."),    
 ];
