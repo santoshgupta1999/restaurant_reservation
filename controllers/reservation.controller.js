@@ -27,6 +27,12 @@ exports.createReservation = async (req, res) => {
             time,
             partySize,
             source,
+            status,
+            seating,
+            tag,
+            constraint,
+            logistic,
+            behavior,
             notes
         } = req.body;
 
@@ -74,6 +80,12 @@ exports.createReservation = async (req, res) => {
             time,
             partySize,
             source,
+            status,
+            seating,
+            tag,
+            constraint,
+            logistic,
+            behavior,
             notes
         });
 
@@ -97,74 +109,59 @@ exports.createReservation = async (req, res) => {
 
 exports.getReservations = async (req, res) => {
     try {
-        const { restaurantId, filter } = req.query;
+        const { restaurantId, date } = req.query;
 
         if (!restaurantId) {
             return res.status(400).json({
                 success: false,
-                message: "restaurantId is required in query params."
+                message: "restaurantId is required"
             });
         }
 
-        const today = new Date();
         const query = { restaurantId };
 
-        switch (filter?.toLowerCase()) {
-            case "upcoming":
-                query.date = { $gte: today };
-                break;
+        // If date exists, validate and add filter
+        if (date) {
+            if (isNaN(new Date(date))) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid date format. Use YYYY-MM-DD"
+                });
+            }
 
-            case "confirmed":
-                query.status = "Confirmed";
-                break;
-
-            case "seated":
-                query.status = "Seated";
-                break;
-
-            case "pending":
-                query.status = "Pending";
-                break;
-
-            case "canceled":
-                query.status = "Canceled";
-                break;
-
-            case "no-show":
-            case "noshow":
-                query.status = "No-show";
-                break;
-
-            default:
-                break;
+            query.$expr = {
+                $eq: [
+                    { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+                    date
+                ]
+            };
         }
 
         const reservations = await Reservation.find(query)
             .populate("restaurantId", "name email phone")
             .populate("tableId", "tableNumber roomName capacity")
             .populate("shiftId", "name startTime endTime")
-            .sort({ date: 1, time: 1 });
+            .sort({ createdAt: 1 });
 
-        if (!reservations.length) {
+        // If date was passed AND no data found → return 404 error
+        if (date && reservations.length === 0) {
             return res.status(404).json({
                 success: false,
-                message:
-                    filter
-                        ? `No ${filter} reservations found for this restaurant.`
-                        : "No reservations found for this restaurant."
+                message: `No reservations found for date ${date}`
             });
         }
 
-        res.status(200).json({
+        // If date not passed → return empty array without error
+        return res.status(200).json({
             success: true,
-            message: `Reservations fetched successfully${filter ? ` (${filter})` : ""}.`,
+            message: "Reservations fetched successfully.",
             count: reservations.length,
             data: reservations
         });
 
     } catch (error) {
         console.error("Error fetching reservations:", error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Error fetching reservations.",
             error: error.message

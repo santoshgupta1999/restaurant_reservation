@@ -31,7 +31,7 @@ exports.createRestaurant = async (req, res) => {
             email,
             phone,
             address,
-            openingHours: JSON.parse(openingHours),
+            openingHours,
             logo,
             createdBy
         });

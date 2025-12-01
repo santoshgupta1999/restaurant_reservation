@@ -44,7 +44,7 @@ const reservationSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ["Pending", "Confirmed", "Seated", "Canceled", "No-show", "Finished"],
+        enum: ["Pending", "Confirmed", "Seated", "Cancelled", "No-show", "Finished"],
         default: "Pending"
     },
     source: {
@@ -52,6 +52,24 @@ const reservationSchema = new mongoose.Schema({
         enum: ["Online", "Walk-in", "Phone"],
         default: "Online"
     },
+    seating: {
+        type: String,
+        enum: ["Any", "Outdoor", "Indoor", "Non Smoking", "Window"],
+        default: "Any"
+    },
+    tag: {
+        type: String
+    },
+    constraint: {
+        type: String
+    },
+    logistic: {
+        type: String
+    },
+    behavior: {
+        type: String
+    },
+
     notes: String
 }, { timestamps: true });
 
