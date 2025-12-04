@@ -24,6 +24,6 @@ router.put('/update/:id',
 );
 
 router.delete('/:id', reservController.deleteReservationById);
-router.put('/status/:id', reservController.updateReservationStatus);
+router.post('/status/:id', reservController.updateReservationStatus);
 
 module.exports = router;

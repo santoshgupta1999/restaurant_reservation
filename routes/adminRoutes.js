@@ -3,6 +3,7 @@ const router = express.Router();
 
 const { restaurantValidator } = require('../validators/restaurantValidation');
 const restController = require('../controllers/restaurant.controller');
+const guestController = require('../controllers/guest.controller');
 const { verifyToken, requireRole } = require('../middlewares/auth.middleware');
 const upload = require('../middlewares/upload.middleware');
 
@@ -22,5 +23,13 @@ router.put('/restaurants/:id',
 router.delete('/restaurants/:id', verifyToken, restController.deleteRestaurant);
 router.get('/getActiveRestaurants', verifyToken, restController.getActiveRestaurants);
 router.put('/updateRestaurantStatus/:id', restController.updateRestaurantStatus);
+
+// ------------------------------------------- Guest ---------------------------------------------- //
+
+router.post('/createGuest', guestController.createGuest);
+router.get('/getGuests', guestController.getGuests);
+router.get('/getGuestById/:id', guestController.getGuestById);
+router.post('/updateGuest/:id', guestController.updateGuest);
+router.post('/deleteGuest/:id', guestController.deleteGuest);
 
 module.exports = router;

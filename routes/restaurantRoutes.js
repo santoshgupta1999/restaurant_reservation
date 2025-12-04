@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 
-const slotController = require('../controllers/slot.controller');
 const tableController = require('../controllers/table.controller');
 const feedbackController = require('../controllers/feedback.controller');
 const blockController = require('../controllers/block.controller');
@@ -13,11 +12,6 @@ const { validate } = require('../middlewares/validationResultHandler');
 const { blockValidator } = require('../validators/blockValidator');
 const { shiftValidator } = require('../validators/shiftValidator');
 
-// ------------------------------------------- Slots ----------------------------------- //
-
-router.post('/slot/add_update', slotController.addOrUpdateSlot);
-router.get('/slot', slotController.getSlotsByRestaurant);
-router.delete('/slot/:id', slotController.deleteSlot);
 
 // ------------------------------------------- Table ----------------------------------- //
 
