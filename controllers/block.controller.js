@@ -74,28 +74,47 @@ exports.createBlock = async (req, res) => {
 
 exports.getAllBlocks = async (req, res) => {
     try {
-        const { restaurantId, filter } = req.query;
+        const { restaurantId } = req.query;
 
-        const query = {};
-        if (restaurantId) query.restaurantId = restaurantId;
-
-        if (filter === "upcoming") {
-            query.type = "Maintenance";
-        } else if (filter === "ended") {
-            query.type = { $in: ["Closed", "Day Off"] };
+        if (!restaurantId) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId is required"
+            });
         }
 
-        const blocks = await Block.find(query)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // ------------ UPCOMING (Maintenance only) -------------
+        const upcoming = await Block.find({
+            restaurantId,
+            type: "Maintenance",
+            endDate: { $gte: today }
+        })
             .populate("restaurantId", "name")
             .populate("tableIds", "tableNumber areaName seatCount")
             .populate("shiftIds", "name startDate endDate startTime endTime")
             .sort({ startDate: 1 });
 
+        // ------------ ENDED (Closed + Day Off) -------------
+        const ended = await Block.find({
+            restaurantId,
+            type: { $in: ["Closed", "Day Off"] },
+            endDate: { $lt: today }
+        })
+            .populate("restaurantId", "name")
+            .populate("tableIds", "tableNumber areaName seatCount")
+            .populate("shiftIds", "name startDate endDate startTime endTime")
+            .sort({ endDate: -1 }); // latest ended first
+
         return res.status(200).json({
             success: true,
-            message: 'Block fetched successfully',
-            count: blocks.length,
-            data: blocks,
+            message: "Blocks fetched successfully",
+            // upcomingCount: upcoming.length,
+            // endedCount: ended.length,
+            upcoming,
+            ended
         });
 
     } catch (error) {
@@ -103,7 +122,7 @@ exports.getAllBlocks = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Internal server error",
-            error: error.message,
+            error: error.message
         });
     }
 };

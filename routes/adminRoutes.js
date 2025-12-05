@@ -4,6 +4,8 @@ const router = express.Router();
 const { restaurantValidator } = require('../validators/restaurantValidation');
 const restController = require('../controllers/restaurant.controller');
 const guestController = require('../controllers/guest.controller');
+const { createGuestValidator, updateGuestValidator, searchGuestValidator } = require('../validators/guestValidator');
+const { validate } = require('../middlewares/validationResultHandler');
 const { verifyToken, requireRole } = require('../middlewares/auth.middleware');
 const upload = require('../middlewares/upload.middleware');
 
@@ -26,10 +28,10 @@ router.put('/updateRestaurantStatus/:id', restController.updateRestaurantStatus)
 
 // ------------------------------------------- Guest ---------------------------------------------- //
 
-router.post('/createGuest', guestController.createGuest);
-router.get('/getGuests', guestController.getGuests);
-router.get('/getGuestById/:id', guestController.getGuestById);
-router.post('/updateGuest/:id', guestController.updateGuest);
+router.post('/createGuest', createGuestValidator, validate, guestController.createGuest);
+router.post('/getGuests', guestController.getGuests);
+router.post('/getGuestById/:id', guestController.getGuestById);
+router.post('/updateGuest/:id', updateGuestValidator, validate, guestController.updateGuest);
 router.post('/deleteGuest/:id', guestController.deleteGuest);
 
 module.exports = router;

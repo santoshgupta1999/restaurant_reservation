@@ -49,7 +49,7 @@ const reservationSchema = new mongoose.Schema({
     },
     source: {
         type: String,
-        enum: ["Online", "Walk-in", "Phone"],
+        enum: ["Online", "Walk-in", "Phone", "Email", "Remi"],
         default: "Online"
     },
     seating: {
