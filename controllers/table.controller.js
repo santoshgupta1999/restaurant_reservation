@@ -39,28 +39,38 @@ exports.createTable = async (req, res) => {
 
 exports.getAllTables = async (req, res) => {
     try {
-        const { restaurantId, roomName } = req.query;
+        const { restaurantId } = req.query;
 
-        const filter = {};
-        if (restaurantId) filter.restaurantId = restaurantId;
-        if (roomName) filter.roomName = roomName;
+        if (!restaurantId) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId is required.",
+            });
+        }
 
-        const tables = await Table.find(filter)
+        const tables = await Table.find({ restaurantId, isActive: true })
             .populate("joinedWith", "tableNumber")
-            .sort({ createdAt: -1 });
+            .sort({ roomName: 1, tableNumber: 1 });
 
         if (!tables.length) {
             return res.status(404).json({
                 success: false,
-                message: `No tables found for the ${roomName}`,
+                message: "No tables found for this restaurant.",
             });
         }
 
+        const groupedTables = tables.reduce((acc, table) => {
+            if (!acc[table.roomName]) acc[table.roomName] = [];
+            acc[table.roomName].push(table);
+            return acc;
+        }, {});
+
         return res.status(200).json({
             success: true,
-            message: `${roomName} Tables fetched successfully.`,
-            count: tables.length,
-            data: tables,
+            message: "Tables fetched successfully.",
+            totalRooms: Object.keys(groupedTables).length,
+            totalTables: tables.length,
+            data: groupedTables,
         });
 
     } catch (error) {

@@ -30,6 +30,9 @@ const reservationSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    dob: {
+        type: Date
+    },
     date: {
         type: Date,
         required: true

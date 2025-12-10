@@ -9,7 +9,7 @@ const { verifyToken, requireRole } = require('../middlewares/auth.middleware');
 const upload = require('../middlewares/upload.middleware');
 const { feedbackValidator, updateFeedbackValidator } = require('../validators/feedbackValidation');
 const { validate } = require('../middlewares/validationResultHandler');
-const { blockValidator } = require('../validators/blockValidator');
+const { blockValidator, updateBlockValidator } = require('../validators/blockValidator');
 const { shiftValidator } = require('../validators/shiftValidator');
 
 
@@ -48,7 +48,7 @@ router.get('/getAverageRating/:restaurantId', feedbackController.getAverageRatin
 router.post('/block', blockValidator, validate, blockController.createBlock);
 router.get('/block/all', blockController.getAllBlocks);
 router.get('/block/:id', blockController.getBlockById);
-router.put('/block/:id', blockValidator, validate, blockController.updateBlock);
+router.put('/block/:id', updateBlockValidator, validate, blockController.updateBlock);
 router.delete('/block/:id', blockController.deleteBlock);
 router.get('/getBlocksCalendarView', blockController.getBlocksCalendarView);
 router.put('/updateBlockStatus/:id', blockController.updateBlockStatus);

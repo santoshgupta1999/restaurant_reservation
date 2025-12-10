@@ -1,70 +1,135 @@
-const { body } = require('express-validator');
+const { body } = require("express-validator");
 
 exports.blockValidator = [
     body("restaurantId")
         .notEmpty()
-        .withMessage("Restaurant ID is required.")
+        .withMessage("restaurantId is required")
         .isMongoId()
-        .withMessage("Invalid Restaurant ID."),
+        .withMessage("Invalid restaurantId"),
 
-    body("name")
+    body("reason")
         .notEmpty()
-        .withMessage("Block name is required.")
-        .isString()
-        .withMessage("Block name must be a string."),
-
-    body("type")
-        .optional()
-        .isIn(["Maintenance", "Closed", "Day Off"])
-        .withMessage("Invalid block type. Allowed values: Maintenance, Closed, Day Off."),
-
-    body("tableIds")
-        .optional()
-        .isArray()
-        .withMessage("tableIds must be an array of Mongo IDs."),
-
-    body("tableIds.*")
-        .optional()
-        .isMongoId()
-        .withMessage("Invalid table ID in tableIds array."),
-
-    body("slotIds")
-        .optional()
-        .isArray()
-        .withMessage("slotIds must be an array of Mongo IDs."),
-
-    body("slotIds.*")
-        .optional()
-        .isMongoId()
-        .withMessage("Invalid slot ID in slotIds array."),
+        .withMessage("reason is required"),
 
     body("startDate")
         .notEmpty()
-        .withMessage("Start date is required.")
+        .withMessage("startDate is required")
         .isISO8601()
-        .toDate()
-        .withMessage("Invalid start date format."),
+        .withMessage("startDate must be a valid date"),
 
     body("endDate")
         .notEmpty()
-        .withMessage("End date is required.")
+        .withMessage("endDate is required")
         .isISO8601()
-        .toDate()
-        .withMessage("Invalid end date format.")
-        .custom((endDate, { req }) => {
-            if (new Date(endDate) < new Date(req.body.startDate)) {
-                throw new Error("End date must be after start date.");
-            }
-            return true;
-        }),
+        .withMessage("endDate must be a valid date"),
+
+    // CASE 1: Full Restaurant Block
+    body("isFullRestaurantBlock")
+        .optional()
+        .isBoolean()
+        .withMessage("isFullRestaurantBlock must be boolean"),
+
+    // CASE 2: Room Block
+    body("roomName")
+        .optional()
+        .isString()
+        .withMessage("roomName must be a string"),
+
+    // CASE 3: Table Block
+    body("tableIds")
+        .optional()
+        .isArray()
+        .withMessage("tableIds must be an array"),
+    body("tableIds.*")
+        .optional()
+        .isMongoId()
+        .withMessage("Each tableId must be valid"),
+
+    // Shift IDs
+    body("shiftIds")
+        .optional()
+        .isArray()
+        .withMessage("shiftIds must be an array"),
+    body("shiftIds.*")
+        .optional()
+        .isMongoId()
+        .withMessage("Invalid shiftId"),
 
     body("daysActive")
         .optional()
         .isArray()
-        .withMessage("daysActive must be an array (e.g., ['Monday', 'Tuesday'])."),
+        .withMessage("daysActive must be an array"),
 
     body("note")
         .optional()
         .isString()
-        .withMessage("Note must be a string.")
+        .withMessage("note must be string"),
+
+    // Custom Validation Logic
+    body()
+        .custom((value) => {
+            const { isFullRestaurantBlock, roomName, tableIds } = value;
+
+            if (isFullRestaurantBlock) return true; // No need for tables or room
+
+            if (roomName) return true; // Room block valid
+
+            if (tableIds && tableIds.length > 0) return true; // Table block valid
+
+            throw new Error(
+                "Provide either isFullRestaurantBlock=true OR roomName OR tableIds[]"
+            );
+        })
+];
+
+
+exports.updateBlockValidator = [
+    body("restaurantId")
+        .optional()
+        .isMongoId()
+        .withMessage("Invalid restaurantId"),
+
+    body("reason")
+        .optional()
+        .isString(),
+
+    body("startDate")
+        .optional()
+        .isISO8601()
+        .withMessage("startDate must be valid date"),
+
+    body("endDate")
+        .optional()
+        .isISO8601()
+        .withMessage("endDate must be valid date"),
+
+    body("isFullRestaurantBlock")
+        .optional()
+        .isBoolean(),
+
+    body("roomName")
+        .optional()
+        .isString(),
+
+    body("tableIds")
+        .optional()
+        .isArray(),
+    body("tableIds.*")
+        .optional()
+        .isMongoId(),
+
+    body("shiftIds")
+        .optional()
+        .isArray(),
+    body("shiftIds.*")
+        .optional()
+        .isMongoId(),
+
+    body("daysActive")
+        .optional()
+        .isArray(),
+
+    body("note")
+        .optional()
+        .isString()
 ];

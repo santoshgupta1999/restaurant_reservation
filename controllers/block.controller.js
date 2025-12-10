@@ -7,67 +7,75 @@ exports.createBlock = async (req, res) => {
     try {
         const {
             restaurantId,
-            name,
-            type,
+            reason,
+            isFullRestaurantBlock,
             tableIds,
+            roomName,
+            shiftIds,
             startDate,
             endDate,
             daysActive,
-            shiftIds,
             note
         } = req.body;
 
-        if (!restaurantId || !name || !startDate || !endDate) {
+        if (!restaurantId || !reason || !startDate || !endDate) {
             return res.status(400).json({
                 success: false,
-                message: 'restaurantId, name, startDate and endDate are required'
+                message: "restaurantId, reason, startDate, endDate are required."
             });
         }
 
-        if (tableIds.length > 0) {
-            const existingTables = await Table.find({ _id: { $in: tableIds } });
-            if (existingTables.length !== tableIds.length) {
-                return res.status(400).json({
-                    success: false,
-                    message: "One or more tableIds do not exist in the database",
-                });
-            }
+        let finalTableIds = [];
+
+        if (isFullRestaurantBlock) {
+            finalTableIds = [];
         }
 
-        if (shiftIds.length > 0) {
-            const existingShifts = await Shift.find({ _id: { $in: shiftIds } });
-            if (existingShifts.length !== shiftIds.length) {
-                return res.status(400).json({
-                    success: false,
-                    message: "One or more shiftIds do not exist in the database",
-                });
-            }
+        else if (roomName) {
+            const roomTables = await Table.find({
+                restaurantId,
+                roomName,
+                isActive: true
+            }).select("_id");
+
+            finalTableIds = roomTables.map(t => t._id);
+        }
+
+        else if (tableIds && tableIds.length > 0) {
+            finalTableIds = tableIds;
+        }
+
+        if (!isFullRestaurantBlock && finalTableIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "No tables found to block. Provide tableIds or roomName."
+            });
         }
 
         const block = await Block.create({
             restaurantId,
-            name,
-            type,
-            tableIds,
+            reason,
+            isFullRestaurantBlock: isFullRestaurantBlock || false,
+            tableIds: finalTableIds,
+            shiftIds: shiftIds || [],
             startDate,
             endDate,
-            daysActive,
-            shiftIds,
+            daysActive: daysActive || [],
             note
         });
 
         return res.status(201).json({
             success: true,
-            message: 'Block created successfully',
+            message: "Block created successfully",
             data: block
         });
 
     } catch (error) {
-        console.error('Block creating error', error);
+        console.error("Create block error:", error);
         res.status(500).json({
             success: false,
-            message: 'Error while creating Block',
-            Error: error.message
+            message: "Error creating block",
+            error: error.message
         });
     }
 };
@@ -86,42 +94,36 @@ exports.getAllBlocks = async (req, res) => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        // ------------ UPCOMING (Maintenance only) -------------
         const upcoming = await Block.find({
             restaurantId,
-            type: "Maintenance",
             endDate: { $gte: today }
         })
-            .populate("restaurantId", "name")
-            .populate("tableIds", "tableNumber areaName seatCount")
-            .populate("shiftIds", "name startDate endDate startTime endTime")
+            .populate("tableIds", "tableNumber roomName capacity")
+            .populate("shiftIds", "name startTime endTime")
             .sort({ startDate: 1 });
 
-        // ------------ ENDED (Closed + Day Off) -------------
         const ended = await Block.find({
             restaurantId,
-            type: { $in: ["Closed", "Day Off"] },
             endDate: { $lt: today }
         })
-            .populate("restaurantId", "name")
-            .populate("tableIds", "tableNumber areaName seatCount")
-            .populate("shiftIds", "name startDate endDate startTime endTime")
-            .sort({ endDate: -1 }); // latest ended first
+            .populate("tableIds", "tableNumber roomName capacity")
+            .populate("shiftIds", "name startTime endTime")
+            .sort({ endDate: -1 });
 
-        return res.status(200).json({
+        res.status(200).json({
             success: true,
             message: "Blocks fetched successfully",
-            // upcomingCount: upcoming.length,
-            // endedCount: ended.length,
+            upcomingCount: upcoming.length,
+            endedCount: ended.length,
             upcoming,
             ended
         });
 
     } catch (error) {
-        console.error("Error fetching blocks:", error);
+        console.error("Get blocks error:", error);
         res.status(500).json({
             success: false,
-            message: "Internal server error",
+            message: "Error fetching blocks",
             error: error.message
         });
     }
@@ -133,26 +135,28 @@ exports.getBlockById = async (req, res) => {
 
         const block = await Block.findById(id)
             .populate("restaurantId", "name")
-            .populate("tableIds", "tableNumber areaName seatCount")
-            .populate("shiftIds", "name startDate endDate startTime endTime");
+            .populate("tableIds", "tableNumber roomName capacity")
+            .populate("shiftIds", "name startTime endTime startDate endDate");
 
         if (!block) {
             return res.status(404).json({
                 success: false,
-                message: "Block not found",
+                message: "Block not found"
             });
         }
 
-        return res.status(200).json({
+        res.status(200).json({
             success: true,
-            data: block,
+            message: "Block fetched successfully",
+            data: block
         });
+
     } catch (error) {
-        console.error("Error fetching block:", error);
+        console.error("Fetch block error:", error);
         res.status(500).json({
             success: false,
-            message: "Internal server error",
-            error: error.message,
+            message: "Error fetching block",
+            error: error.message
         });
     }
 };
@@ -160,73 +164,28 @@ exports.getBlockById = async (req, res) => {
 exports.updateBlock = async (req, res) => {
     try {
         const { id } = req.params;
-        const {
-            name,
-            type,
-            tableIds,
-            startDate,
-            endDate,
-            daysActive,
-            shiftIds,
-            note,
-            isActive,
-        } = req.body;
 
-        const updatedBlock = await Block.findByIdAndUpdate(
-            id,
-            {
-                name,
-                type,
-                tableIds,
-                startDate,
-                endDate,
-                daysActive,
-                shiftIds,
-                note,
-                isActive,
-            },
-            { new: true }
-        );
+        const updated = await Block.findByIdAndUpdate(id, req.body, { new: true });
 
-        if (!updatedBlock) {
+        if (!updated) {
             return res.status(404).json({
                 success: false,
-                message: "Block not found",
+                message: "Block not found"
             });
         }
 
-        if (tableIds.length > 0) {
-            const existingTables = await Table.find({ _id: { $in: tableIds } });
-            if (existingTables.length !== tableIds.length) {
-                return res.status(400).json({
-                    success: false,
-                    message: "One or more tableIds do not exist in the database",
-                });
-            }
-        }
-
-        if (shiftIds.length > 0) {
-            const existingShifts = await Shift.find({ _id: { $in: shiftIds } });
-            if (existingShifts.length !== shiftIds.length) {
-                return res.status(400).json({
-                    success: false,
-                    message: "One or more slotIds do not exist in the database",
-                });
-            }
-        }
-
-        return res.status(200).json({
+        res.status(200).json({
             success: true,
             message: "Block updated successfully",
-            data: updatedBlock,
+            data: updated
         });
 
     } catch (error) {
-        console.error("Error updating block:", error);
+        console.error("Update block error:", error);
         res.status(500).json({
             success: false,
-            message: "Internal server error",
-            error: error.message,
+            message: "Error updating block",
+            error: error.message
         });
     }
 };
@@ -236,24 +195,25 @@ exports.deleteBlock = async (req, res) => {
         const { id } = req.params;
 
         const deleted = await Block.findByIdAndDelete(id);
+
         if (!deleted) {
             return res.status(404).json({
                 success: false,
-                message: "Block not found",
+                message: "Block not found"
             });
         }
 
-        return res.status(200).json({
+        res.status(200).json({
             success: true,
-            message: "Block deleted successfully",
+            message: "Block deleted successfully"
         });
 
     } catch (error) {
-        console.error("Error deleting block:", error);
+        console.error("Delete block error:", error);
         res.status(500).json({
             success: false,
-            message: "Internal server error",
-            error: error.message,
+            message: "Error deleting block",
+            error: error.message
         });
     }
 };
@@ -304,40 +264,30 @@ exports.updateBlockStatus = async (req, res) => {
         const { id } = req.params;
         const { isActive } = req.body;
 
-        if (typeof isActive !== "boolean") {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid input. 'isActive' must be true or false."
-            });
-        }
-
-        const updatedBlock = await Block.findByIdAndUpdate(
+        const block = await Block.findByIdAndUpdate(
             id,
             { isActive },
-            { new: true, runValidators: true }
-        )
-            .populate("restaurantId", "name email phone address")
-            .populate("tableIds", "tableNumber roomName")
-            .populate("shiftIds", "name startDate endDate");
+            { new: true }
+        );
 
-        if (!updatedBlock) {
+        if (!block) {
             return res.status(404).json({
                 success: false,
-                message: "Block not found."
+                message: "Block not found"
             });
         }
 
-        return res.status(200).json({
+        res.status(200).json({
             success: true,
-            message: `Block has been ${isActive ? "activated" : "deactivated"} successfully.`,
-            data: updatedBlock
+            message: `Block ${isActive ? "activated" : "deactivated"} successfully`,
+            data: block
         });
 
     } catch (error) {
-        console.error("Error updating block status:", error);
+        console.error("Status update error:", error);
         res.status(500).json({
             success: false,
-            message: "Error updating block status.",
+            message: "Error updating block status",
             error: error.message
         });
     }
