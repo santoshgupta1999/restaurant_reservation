@@ -18,7 +18,6 @@ exports.createReservation = async (req, res) => {
         const {
             restaurantId,
             tableId,
-            shiftId,
             firstName,
             lastName,
             guestEmail,
@@ -37,19 +36,76 @@ exports.createReservation = async (req, res) => {
             notes
         } = req.body;
 
-        if (!restaurantId || !shiftId) {
+        if (!restaurantId || !date || !time) {
             return res.status(400).json({
                 success: false,
-                message: "restaurantId and shiftId are required."
+                message: "restaurantId, date & time are required."
             });
         }
 
-        const shiftExists = await Shift.findById(shiftId);
-        if (!shiftExists) {
-            return res.status(404).json({
+        const reservationDate = new Date(date);
+        const weekdayName = reservationDate.toLocaleDateString("en-US", { weekday: "long" });
+
+        const allShifts = await Shift.find({
+            restaurantId,
+            isActive: true,
+            $or: [
+                {
+                    type: "Recurring",
+                    daysActive: { $in: [weekdayName] }
+                },
+                {
+                    type: "Special",
+                    startDate: { $lte: reservationDate },
+                    endDate: { $gte: reservationDate }
+                }
+            ]
+        });
+
+        if (!allShifts.length) {
+            return res.status(400).json({
                 success: false,
-                message: "Invalid shiftId — shift not found."
+                message: "No shifts available for this day."
             });
+        }
+
+        // Convert time to minutes
+        const [hh, mm] = time.split(":").map(Number);
+        const reservationMinutes = hh * 60 + mm;
+
+        const convertToMinutes = t => {
+            const [h, m] = t.split(":").map(Number);
+            return h * 60 + m;
+        };
+
+        let shift = allShifts.find(s => {
+            const start = convertToMinutes(s.startTime);
+            const end = convertToMinutes(s.endTime);
+            return reservationMinutes >= start && reservationMinutes < end;
+        });
+
+        if (!shift) {
+            let nearestShift = null;
+            let minDiff = Infinity;
+
+            allShifts.forEach(s => {
+                const start = convertToMinutes(s.startTime);
+                const diff = Math.abs(reservationMinutes - start);
+
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    nearestShift = s;
+                }
+            });
+
+            if (minDiff > 60) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Reservation time is outside all shift timings."
+                });
+            }
+
+            shift = nearestShift;
         }
 
         if (tableId) {
@@ -72,13 +128,13 @@ exports.createReservation = async (req, res) => {
         const newReservation = new Reservation({
             restaurantId,
             tableId,
-            shiftId,
+            shiftId: shift._id,
             firstName,
             lastName,
             guestEmail,
             guestPhone,
             dob,
-            date: new Date(date),
+            date: reservationDate,
             time,
             partySize,
             source,
@@ -96,6 +152,7 @@ exports.createReservation = async (req, res) => {
         return res.status(201).json({
             success: true,
             message: "Reservation created successfully.",
+            assignedShift: shift.name,
             data: newReservation
         });
 

@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
 const baseUrl = process.env.BASE_URL;
+const { validationResult } = require("express-validator");
 
 
 exports.createRestaurant = async (req, res) => {
@@ -361,7 +362,31 @@ exports.updateRestaurantStatus = async (req, res) => {
 
 exports.createShift = async (req, res) => {
     try {
-        const shift = await Shift.create(req.body);
+
+        // Handle validation errors from route
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                errors: errors.array()
+            });
+        }
+
+        let payload = { ...req.body };
+
+        // Handle duration logic
+        if (payload.sameDurationForAll) {
+            delete payload.durationByPartySize;
+        } else {
+            delete payload.duration;
+        }
+
+        // Handle payment logic
+        if (!payload.includePayment) {
+            payload.payment = undefined;
+        }
+
+        const shift = await Shift.create(payload);
 
         return res.status(201).json({
             success: true,
@@ -370,11 +395,11 @@ exports.createShift = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error creating shift', error);
+        console.error("Error creating shift:", error);
         res.status(500).json({
             success: false,
-            message: 'Error during creating shifts',
-            Error: error.message
+            message: "Error during creating shift",
+            error: error.message
         });
     }
 };
@@ -384,7 +409,15 @@ exports.getAllShift = async (req, res) => {
         const { restaurantId, type } = req.query;
         const query = {};
 
-        if (restaurantId) query.restaurantId = restaurantId;
+        if (restaurantId) {
+            if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid restaurantId",
+                });
+            }
+            query.restaurantId = restaurantId;
+        }
 
         if (type) query.type = type;
 
@@ -392,14 +425,7 @@ exports.getAllShift = async (req, res) => {
             .populate("restaurantId", "name email phone address")
             .sort({ createdAt: -1 });
 
-        if (!shifts.length) {
-            return res.status(404).json({
-                success: false,
-                message: "No shifts found for the given filters.",
-            });
-        }
-
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: "Shifts fetched successfully.",
             count: shifts.length,
@@ -407,8 +433,9 @@ exports.getAllShift = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error fetching shifts:", error);
-        res.status(500).json({
+        console.error("Error fetching shifts:", error.message);
+
+        return res.status(500).json({
             success: false,
             message: "Internal server error.",
             error: error.message,
@@ -420,64 +447,17 @@ exports.getShiftById = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const shift = await Shift.findById(id).populate("restaurantId", "name email phone");
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid shift ID"
+            });
+        }
+
+        const shift = await Shift.findById(id)
+            .populate("restaurantId", "name email phone");
+
         if (!shift) {
-            return res.status(404).json({
-                success: false,
-                message: 'Shift not found'
-            });
-        }
-
-        return res.status(200).json({
-            success: true,
-            message: 'Shifts fetched successfully',
-            data: shift
-        });
-
-    } catch (error) {
-        console.error('Error while fetching shifts');
-        res.status(500).json({
-            success: false,
-            message: 'Error fetching shifts',
-            Error: error.message
-        });
-    }
-};
-
-exports.updateShift = async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const updatedShift = await Shift.findOneAndUpdate({ _id: id }, req.body, { new: true });
-        if (!updatedShift) {
-            return res.status(404).json({
-                success: false,
-                message: 'Shift not found'
-            });
-        }
-
-        return res.status(200).json({
-            success: true,
-            message: 'Shift updated successfully',
-            data: updatedShift
-        });
-
-    } catch (error) {
-        console.error('Error while updating shifts', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error while updating shifts',
-            Error: error.message
-        });
-    }
-};
-
-exports.deleteShift = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const deletedShift = await Shift.findByIdAndDelete(id);
-
-        if (!deletedShift) {
             return res.status(404).json({
                 success: false,
                 message: "Shift not found"
@@ -486,15 +466,104 @@ exports.deleteShift = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: "Shift deleted successfully"
+            message: "Shift fetched successfully",
+            data: shift
         });
 
     } catch (error) {
-        console.error("Error deleting shift:", error);
-        res.status(500).json({
+        console.error("Error while fetching shift:", error.message);
+
+        return res.status(500).json({
             success: false,
-            message: "Internal server error",
+            message: "Error fetching shift",
             error: error.message
+        });
+    }
+};
+
+exports.updateShift = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid shift ID.",
+            });
+        }
+
+        const restrictedFields = ["_id", "createdAt", "updatedAt"];
+        restrictedFields.forEach(field => delete req.body[field]);
+
+        const updatedShift = await Shift.findByIdAndUpdate(
+            id,
+            req.body,
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedShift) {
+            return res.status(404).json({
+                success: false,
+                message: "Shift not found.",
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Shift updated successfully.",
+            data: updatedShift,
+        });
+
+    } catch (error) {
+        console.error("Error while updating shift:", error.message);
+
+        return res.status(500).json({
+            success: false,
+            message: "Error while updating shift.",
+            error: error.message,
+        });
+    }
+};
+
+exports.deleteShift = async (req, res) => {
+    try {
+        const { id } = req.body;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "Shift ID is required in body.",
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid shift ID.",
+            });
+        }
+
+        const deletedShift = await Shift.findByIdAndDelete(id);
+
+        if (!deletedShift) {
+            return res.status(404).json({
+                success: false,
+                message: "Shift not found.",
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Shift deleted successfully.",
+        });
+
+    } catch (error) {
+        console.error("Error deleting shift:", error.message);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error.",
+            error: error.message,
         });
     }
 };

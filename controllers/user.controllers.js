@@ -153,7 +153,7 @@ exports.getProfile = async (req, res) => {
         }
 
         const imageUrl = user.profileImage
-            ? `${req.protocol}://${req.get("host")}/uploads/users/${user.profileImage}`
+            ? `uploads/users/${user.profileImage}`
             : null;
 
         return res.status(200).json({
@@ -384,6 +384,7 @@ exports.forgotPassword = async (req, res) => {
             success: true,
             message: "OTP sent successfully to your email",
             token,
+            otp
         });
     } catch (error) {
         console.error("Forgot Password Error:", error);

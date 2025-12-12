@@ -40,7 +40,6 @@ router.get('/getFeedbackById/:id', feedbackController.getFeedbackById);
 router.put("/updateFeedback/:id", updateFeedbackValidator, validate, feedbackController.updateFeedback);
 router.delete('/deleteFeedback/:id', feedbackController.deleteFeedback);
 router.get('/getFeedbackByRestaurant/:id', feedbackController.getFeedbackByRestaurant);
-router.get('/getAverageRating/:restaurantId', feedbackController.getAverageRatingByRestaurant);
 
 
 // ------------------------------------------- Block ------------------------------------- //
@@ -59,9 +58,9 @@ router.post('/shift', shiftValidator, validate, restaurantController.createShift
 router.get('/shift_all', restaurantController.getAllShift);
 router.get('/shift/:id', restaurantController.getShiftById);
 router.put('/shift/:id', shiftValidator, validate, restaurantController.updateShift);
-router.delete('/shift/:id', restaurantController.deleteShift);
+router.post('/deleteShift', restaurantController.deleteShift);
 router.get('/shift/active/today', restaurantController.getActiveShiftsForToday);
 router.get('/getShiftsCalendarView', restaurantController.getShiftsCalendarView);
-router.put("/updateShiftStatus/:id", restaurantController.updateShiftStatus);
+router.post("/updateShiftStatus/:id", restaurantController.updateShiftStatus);
 
 module.exports = router;

@@ -209,18 +209,37 @@ exports.getFeedbackByRestaurant = async (req, res) => {
         const feedbacks = await Feedback.find({ restaurantId: id })
             .populate("reservationId", "guestName date time")
             .populate("respondedBy", "name email role")
-            .sort({ createdAt: -1 })
+            .sort({ createdAt: -1 });
 
-        if (!feedbacks.length) {
-            return res.status(404).json({
-                success: false,
-                message: 'No feedback found for this restaurant'
-            });
-        }
+        // Always return average rating even if no feedback found
+        const ratingStats = await Feedback.aggregate([
+            {
+                $match: {
+                    restaurantId: new mongoose.Types.ObjectId(id)
+                }
+            },
+            {
+                $group: {
+                    _id: "$restaurantId",
+                    averageRating: { $avg: "$rating" },
+                    totalFeedback: { $sum: 1 }
+                }
+            }
+        ]);
+
+        const averageRating = ratingStats.length
+            ? parseFloat(ratingStats[0].averageRating.toFixed(1))
+            : 0;
+
+        const totalFeedback = ratingStats.length
+            ? ratingStats[0].totalFeedback
+            : 0;
 
         return res.status(200).json({
             success: true,
             message: 'Feedback fetched successfully for restaurant',
+            averageRating,
+            totalFeedback,
             count: feedbacks.length,
             data: feedbacks
         });
@@ -230,57 +249,6 @@ exports.getFeedbackByRestaurant = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error while fetching feedback by restaurant',
-            Error: error.message
-        });
-    }
-};
-
-exports.getAverageRatingByRestaurant = async (req, res) => {
-    try {
-        const { restaurantId } = req.params;
-
-        if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid restaurnt ID'
-            });
-        }
-
-        const result = await Feedback.aggregate([
-            { $match: { restaurantId: new mongoose.Types.ObjectId(restaurantId) } },
-            {
-                $group: {
-                    _id: "$restaurantId",
-                    averageRating: { $avg: "$rating" },
-                    totalFeedback: { $sum: 1 },
-                },
-            },
-        ]);
-
-        if (!result.length) {
-            return res.status(404).json({
-                success: false,
-                message: 'No Ratings found for this restaurant'
-            });
-        }
-
-        const { averageRating, totalFeedback } = result[0];
-
-        return res.status(200).json({
-            success: true,
-            message: 'Average rating fetched successfully',
-            data: {
-                restaurantId,
-                averageRating: parseFloat(averageRating.toFixed(1)),
-                totalFeedback
-            },
-        });
-
-    } catch (error) {
-        console.error('Error while fetching Average ratings', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error while fetching Average ratings',
             Error: error.message
         });
     }

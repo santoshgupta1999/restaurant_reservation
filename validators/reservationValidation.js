@@ -5,9 +5,9 @@ exports.reservationValidator = [
         .notEmpty().withMessage("Restaurant ID is required.")
         .isMongoId().withMessage("Invalid Restaurant ID."),
 
-    body("shiftId")
-        .notEmpty().withMessage("Shift ID is required.")
-        .isMongoId().withMessage("Invalid Shift ID."),
+    // body("shiftId")
+    //     .notEmpty().withMessage("Shift ID is required.")
+    //     .isMongoId().withMessage("Invalid Shift ID."),
 
     body("firstName").notEmpty().withMessage("first name is required."),
     body("lastName").notEmpty().withMessage("last name is required."),
