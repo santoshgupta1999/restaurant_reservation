@@ -191,7 +191,7 @@ exports.updateProfile = async (req, res) => {
             });
         }
 
-        const { name, phone, email } = req.body;
+        const { name, phone, email, restaurantId } = req.body;
 
         const user = await User.findById(userId);
         if (!user) {
@@ -216,6 +216,7 @@ exports.updateProfile = async (req, res) => {
         user.name = name || user.name;
         user.phone = phone || user.phone;
         user.email = email || user.email;
+        user.restaurantId = restaurantId || user.restaurantId;
         user.profileImage = newImage;
 
         await user.save();
@@ -243,35 +244,6 @@ exports.updateProfile = async (req, res) => {
             success: false,
             message: "Error updating profile",
             error: error.message,
-        });
-    }
-};
-
-exports.logout = async (req, res) => {
-    try {
-        const authHeader = req.headers?.authorization;
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-            return res.status(401).json({
-                success: false,
-                message: "Authorization token missing"
-            });
-        }
-
-        const token = authHeader.split(" ")[1];
-
-        await BlacklistToken.create({ token });
-
-        return res.status(200).json({
-            success: true,
-            message: "Logged out successfully"
-        });
-
-    } catch (error) {
-        console.error("Logout error:", error);
-        res.status(500).json({
-            success: false,
-            message: "Error during logout",
-            error: error.message
         });
     }
 };

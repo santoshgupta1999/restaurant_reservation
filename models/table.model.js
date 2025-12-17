@@ -23,7 +23,7 @@ const tableSchema = new mongoose.Schema(
         displayName: {
             type: String,
             trim: true,
-            default: null, // it's optional field for display label (e.g., “T1”, “VIP-01”)
+            default: null,
         },
 
         capacity: {

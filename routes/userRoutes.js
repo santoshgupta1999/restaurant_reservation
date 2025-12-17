@@ -4,7 +4,6 @@ const {
     login,
     getProfile,
     updateProfile,
-    logout,
     changePassword,
     forgotPassword,
     verifyOtp,
@@ -29,7 +28,6 @@ router.get('/profile', verifyToken, getProfile);
 router.post('/profile', upload.single('profile'), verifyToken,
     updateProfileValidator, validate, updateProfile);
 
-router.post('/logout', verifyToken, logout);
 router.post('/change-password', verifyToken, changePassword);
 router.post('/forgot-password', forgotPassword);
 router.post('/verify-otp', verifyToken, verifyOtp);

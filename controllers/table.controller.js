@@ -264,30 +264,37 @@ exports.getAvailableTables = async (req, res) => {
 
 exports.mergeTables = async (req, res) => {
     try {
-        const { primaryTableId, tableIds } = req.body;
+        const { tableIds } = req.body;
 
-        if (!primaryTableId || !Array.isArray(tableIds) || !tableIds.length) {
+        if (!Array.isArray(tableIds) || tableIds.length < 2) {
             return res.status(400).json({
                 success: false,
-                message: "primaryTableId and tableIds (array) are required."
+                message: "At least two tableIds are required to merge."
             });
         }
 
-        // Fetch primary and all tables
-        const primary = await Table.findById(primaryTableId);
-        const others = await Table.find({ _id: { $in: tableIds } });
+        const tables = await Table.find({ _id: { $in: tableIds } });
 
-        if (!primary || !others.length) {
+        if (tables.length !== tableIds.length) {
             return res.status(404).json({
                 success: false,
-                message: "Invalid table IDs."
+                message: "One or more tables not found."
             });
         }
 
-        // Check restaurant consistency
-        const allSameRestaurant = others.every(
-            (t) => t.restaurantId.toString() === primary.restaurantId.toString()
+        const alreadyJoined = tables.find(t => t.isJoined);
+        if (alreadyJoined) {
+            return res.status(400).json({
+                success: false,
+                message: `Table ${alreadyJoined.tableNumber} is already merged.`
+            });
+        }
+
+        const restaurantId = tables[0].restaurantId.toString();
+        const allSameRestaurant = tables.every(
+            t => t.restaurantId.toString() === restaurantId
         );
+
         if (!allSameRestaurant) {
             return res.status(400).json({
                 success: false,
@@ -295,19 +302,21 @@ exports.mergeTables = async (req, res) => {
             });
         }
 
-        // Update tables as joined
-        const allIds = [primaryTableId, ...tableIds];
         await Table.updateMany(
-            { _id: { $in: allIds } },
-            { $set: { isJoined: true, joinedWith: allIds } }
+            { _id: { $in: tableIds } },
+            {
+                $set: {
+                    isJoined: true,
+                    joinedWith: tableIds
+                }
+            }
         );
 
         return res.status(200).json({
             success: true,
             message: "Tables merged successfully.",
             data: {
-                primaryTableId,
-                mergedTables: allIds
+                mergedTableIds: tableIds
             }
         });
 
@@ -642,6 +651,54 @@ exports.updateTableStatus = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Error updating table status.",
+            error: error.message
+        });
+    }
+};
+
+exports.getAllBookingsDetails = async (req, res) => {
+    try {
+        const { restaurantId, date, status, tableId } = req.body;
+
+        if (!restaurantId) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId is required"
+            });
+        }
+
+        const query = { restaurantId };
+
+        if (tableId) query.tableId = tableId;
+        if (status) query.status = status;
+
+        if (date) {
+            const start = new Date(date);
+            start.setHours(0, 0, 0, 0);
+
+            const end = new Date(date);
+            end.setHours(23, 59, 59, 999);
+
+            query.date = { $gte: start, $lte: end };
+        }
+
+        const bookings = await Reservation.find(query)
+            .populate("tableId", "tableNumber roomName capacity status")
+            .populate("shiftId", "name startTime endTime")
+            .sort({ date: 1, time: 1 });
+
+        return res.status(200).json({
+            success: true,
+            message: "Bookings fetched successfully",
+            count: bookings.length,
+            data: bookings
+        });
+
+    } catch (error) {
+        console.error("Error fetching bookings:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching bookings",
             error: error.message
         });
     }
