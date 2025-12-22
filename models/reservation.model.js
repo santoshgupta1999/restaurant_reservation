@@ -53,7 +53,7 @@ const reservationSchema = new mongoose.Schema({
     source: {
         type: String,
         enum: ["Online", "Walk-in", "Phone", "Email", "Remi"],
-        default: "Online"
+        default: "Phone"
     },
     seating: {
         type: String,

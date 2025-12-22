@@ -179,30 +179,30 @@ exports.getReservations = async (req, res) => {
 
         const query = { restaurantId };
 
-        // If date exists, validate and add filter
         if (date) {
-            if (isNaN(new Date(date))) {
+            const parsedDate = new Date(date);
+            if (isNaN(parsedDate)) {
                 return res.status(400).json({
                     success: false,
                     message: "Invalid date format. Use YYYY-MM-DD"
                 });
             }
 
-            query.$expr = {
-                $eq: [
-                    { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
-                    date
-                ]
-            };
+            const start = new Date(parsedDate.setHours(0, 0, 0, 0));
+            const end = new Date(parsedDate.setHours(23, 59, 59, 999));
+
+            query.date = { $gte: start, $lte: end };
         }
 
         const reservations = await Reservation.find(query)
             .populate("restaurantId", "name email phone")
             .populate("tableId", "tableNumber roomName capacity")
-            .populate("shiftId", "name startTime endTime")
-            .sort({ createdAt: 1 });
+            .populate({
+                path: "shiftId",
+                select: "name startTime endTime type"
+            })
+            .sort({ time: 1 });
 
-        // If date was passed AND no data found → return 404 error
         if (date && reservations.length === 0) {
             return res.status(404).json({
                 success: false,
@@ -210,10 +210,9 @@ exports.getReservations = async (req, res) => {
             });
         }
 
-        // If date not passed → return empty array without error
         return res.status(200).json({
             success: true,
-            message: "Reservations fetched successfully.",
+            message: "Reservations fetched successfully",
             count: reservations.length,
             data: reservations
         });
@@ -222,7 +221,7 @@ exports.getReservations = async (req, res) => {
         console.error("Error fetching reservations:", error);
         return res.status(500).json({
             success: false,
-            message: "Error fetching reservations.",
+            message: "Error fetching reservations",
             error: error.message
         });
     }
@@ -279,25 +278,131 @@ exports.updateReservationById = async (req, res) => {
             });
         }
 
-        const updatedReservation = await Reservation.findByIdAndUpdate(
-            id,
-            updateData,
-            { new: true, runValidators: true }
-        )
-            .populate("restaurantId", "name email phone address")
-            .populate("tableId", "tableNumber roomName capacity")
-            .populate("shiftId", "name startTime endTime type");
-
-        if (!updatedReservation) {
+        const reservation = await Reservation.findById(id);
+        if (!reservation) {
             return res.status(404).json({
                 success: false,
                 message: "Reservation not found."
             });
         }
 
-        res.status(200).json({
+        // If date or time is updated → re-evaluate shift
+        let shiftId = reservation.shiftId;
+
+        if (updateData.date || updateData.time) {
+            const reservationDate = updateData.date
+                ? new Date(updateData.date)
+                : reservation.date;
+
+            const time = updateData.time || reservation.time;
+
+            const weekdayName = reservationDate.toLocaleDateString("en-US", {
+                weekday: "long"
+            });
+
+            const allShifts = await Shift.find({
+                restaurantId: reservation.restaurantId,
+                isActive: true,
+                $or: [
+                    {
+                        type: "Recurring",
+                        daysActive: { $in: [weekdayName] }
+                    },
+                    {
+                        type: "Special",
+                        startDate: { $lte: reservationDate },
+                        endDate: { $gte: reservationDate }
+                    }
+                ]
+            });
+
+            if (!allShifts.length) {
+                return res.status(400).json({
+                    success: false,
+                    message: "No shifts available for this day."
+                });
+            }
+
+            const convertToMinutes = (t) => {
+                const [h, m] = t.split(":").map(Number);
+                return h * 60 + m;
+            };
+
+            const reservationMinutes = convertToMinutes(time);
+
+            let matchedShift = allShifts.find(s => {
+                const start = convertToMinutes(s.startTime);
+                const end = convertToMinutes(s.endTime);
+                return reservationMinutes >= start && reservationMinutes < end;
+            });
+
+            if (!matchedShift) {
+                let nearestShift = null;
+                let minDiff = Infinity;
+
+                allShifts.forEach(s => {
+                    const diff = Math.abs(
+                        reservationMinutes - convertToMinutes(s.startTime)
+                    );
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        nearestShift = s;
+                    }
+                });
+
+                if (minDiff > 60) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Reservation time is outside all shift timings."
+                    });
+                }
+
+                matchedShift = nearestShift;
+            }
+
+            shiftId = matchedShift._id;
+            updateData.shiftId = shiftId;
+            updateData.date = reservationDate;
+        }
+
+        // Table availability check (if tableId/date/time changes)
+        if (updateData.tableId || updateData.date || updateData.time) {
+            const tableId = updateData.tableId || reservation.tableId;
+            const date = updateData.date || reservation.date;
+            const time = updateData.time || reservation.time;
+
+            if (tableId) {
+                const existing = await Reservation.findOne({
+                    _id: { $ne: id },
+                    restaurantId: reservation.restaurantId,
+                    tableId,
+                    date,
+                    time,
+                    status: { $nin: ["Canceled", "No-show"] }
+                });
+
+                if (existing) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "This table is already reserved for the selected date & time."
+                    });
+                }
+            }
+        }
+
+        const updatedReservation = await Reservation.findByIdAndUpdate(
+            id,
+            updateData,
+            { new: true, runValidators: true }
+        )
+            .populate("restaurantId", "name phone")
+            .populate("tableId", "tableNumber roomName capacity")
+            .populate("shiftId", "name startTime endTime");
+
+        return res.status(200).json({
             success: true,
             message: "Reservation updated successfully.",
+            assignedShift: updatedReservation.shiftId?.name,
             data: updatedReservation
         });
 

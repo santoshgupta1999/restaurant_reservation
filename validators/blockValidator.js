@@ -33,13 +33,16 @@ exports.blockValidator = [
     body("roomName")
         .optional()
         .isString()
-        .withMessage("roomName must be a string"),
+        .withMessage("Block name is required")
+        .isLength({ min: 3, max: 60 })
+        .withMessage("roomName must be between 3 and 60 characters"),
 
     // CASE 3: Table Block
     body("tableIds")
         .optional()
         .isArray()
         .withMessage("tableIds must be an array"),
+
     body("tableIds.*")
         .optional()
         .isMongoId()
