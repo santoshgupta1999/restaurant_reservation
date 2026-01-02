@@ -23,12 +23,10 @@ const reservationSchema = new mongoose.Schema({
         required: true
     },
     guestEmail: {
-        type: String,
-        required: true
+        type: String
     },
     guestPhone: {
-        type: String,
-        required: true
+        type: String
     },
     dob: {
         type: Date

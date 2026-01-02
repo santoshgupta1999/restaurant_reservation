@@ -1,3 +1,4 @@
+const { default: mongoose } = require("mongoose");
 const Guest = require("../models/guest.model");
 
 exports.createGuest = async (req, res) => {
@@ -167,6 +168,58 @@ exports.getGuestVisitHistory = async (req, res) => {
             success: false,
             message: "Error fetching visit history",
             error: error.message
+        });
+    }
+};
+
+exports.updateGuestStatus = async (req, res) => {
+    try {
+        const { id, isActive } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid Guest ID"
+            });
+        }
+
+        if (typeof isActive !== "boolean") {
+            return res.status(400).json({
+                success: false,
+                message: "isActive must be true or false"
+            });
+        }
+
+        const updateGuest = await Guest.findByIdAndUpdate(
+            id,
+            { isActive },
+            { new: true }
+        );
+
+        if (!updateGuest) {
+            return res.status(404).json({
+                success: false,
+                message: "Guest not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Guest ${isActive ? "activated" : "deactivated"} successfully`,
+            data: {
+                id: updateGuest._id,
+                firstName: updateGuest.firstName,
+                lastName: updateGuest.lastName,
+                isActive: updateGuest.isActive
+            }
+        });
+
+    } catch (error) {
+        console.error("Error while updating the Status", error);
+        res.status(500).json({
+            success: false,
+            message: "Error while updating the Status",
+            Error: error.message
         });
     }
 };

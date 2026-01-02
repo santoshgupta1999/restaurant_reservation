@@ -111,7 +111,7 @@ exports.getFeedbackById = async (req, res) => {
         }
 
         return res.status(200).json({
-            success: false,
+            success: true,
             message: 'Feedback details fetched sucessfully',
             data: feedback
         });

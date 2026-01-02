@@ -8,6 +8,7 @@ exports.createBlock = async (req, res) => {
         const {
             restaurantId,
             reason,
+            status, // Draft | Active
             isFullRestaurantBlock,
             tableIds,
             roomName,
@@ -18,20 +19,24 @@ exports.createBlock = async (req, res) => {
             note
         } = req.body;
 
-        if (!restaurantId || !reason || !startDate || !endDate) {
+        if (!restaurantId || !reason) {
             return res.status(400).json({
                 success: false,
-                message: "restaurantId, reason, startDate, endDate are required."
+                message: "restaurantId and reason are required."
+            });
+        }
+
+        // Date validation only if not Draft
+        if (status !== "Draft" && (!startDate || !endDate)) {
+            return res.status(400).json({
+                success: false,
+                message: "startDate & endDate are required for active blocks."
             });
         }
 
         let finalTableIds = [];
 
-        if (isFullRestaurantBlock) {
-            finalTableIds = [];
-        }
-
-        else if (roomName) {
+        if (!isFullRestaurantBlock && roomName) {
             const roomTables = await Table.find({
                 restaurantId,
                 roomName,
@@ -40,33 +45,27 @@ exports.createBlock = async (req, res) => {
 
             finalTableIds = roomTables.map(t => t._id);
         }
-
-        else if (tableIds && tableIds.length > 0) {
+        else if (!isFullRestaurantBlock && tableIds?.length) {
             finalTableIds = tableIds;
-        }
-
-        if (!isFullRestaurantBlock && finalTableIds.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "No tables found to block. Provide tableIds or roomName."
-            });
         }
 
         const block = await Block.create({
             restaurantId,
             reason,
+            status: status || "Active",
             isFullRestaurantBlock: isFullRestaurantBlock || false,
             tableIds: finalTableIds,
+            roomName,
             shiftIds: shiftIds || [],
-            startDate,
-            endDate,
+            startDate: status === "Draft" ? null : startDate,
+            endDate: status === "Draft" ? null : endDate,
             daysActive: daysActive || [],
             note
         });
 
         return res.status(201).json({
             success: true,
-            message: "Block created successfully",
+            message: `Block ${status === "Draft" ? "saved as draft" : "created successfully"}`,
             data: block
         });
 
@@ -164,20 +163,59 @@ exports.getBlockById = async (req, res) => {
 exports.updateBlock = async (req, res) => {
     try {
         const { id } = req.params;
+        const payload = req.body;
 
-        const updated = await Block.findByIdAndUpdate(id, req.body, { new: true });
-
-        if (!updated) {
+        const block = await Block.findById(id);
+        if (!block) {
             return res.status(404).json({
                 success: false,
                 message: "Block not found"
             });
         }
 
+        const finalStatus = payload.status || block.status;
+        const finalStartDate = payload.startDate || block.startDate;
+        const finalEndDate = payload.endDate || block.endDate;
+
+        // Validate dates if moving to Active / Ended
+        if (finalStatus !== "Draft") {
+            if (!finalStartDate || !finalEndDate) {
+                return res.status(400).json({
+                    success: false,
+                    message: "startDate and endDate are required for Active/Ended blocks"
+                });
+            }
+
+            if (new Date(finalStartDate) > new Date(finalEndDate)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "startDate cannot be greater than endDate"
+                });
+            }
+        }
+
+        // 🔹 Full restaurant block logic
+        if (payload.isFullRestaurantBlock === true) {
+            payload.tableIds = [];
+        }
+
+        const updatedBlock = await Block.findByIdAndUpdate(
+            id,
+            {
+                ...payload,
+                startDate: finalStatus === "Draft" ? null : finalStartDate,
+                endDate: finalStatus === "Draft" ? null : finalEndDate
+            },
+            {
+                new: true,
+                runValidators: true
+            }
+        );
+
         res.status(200).json({
             success: true,
             message: "Block updated successfully",
-            data: updated
+            data: updatedBlock
         });
 
     } catch (error) {

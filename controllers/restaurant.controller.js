@@ -149,17 +149,17 @@ exports.updateRestaurant = async (req, res) => {
 
         const updateFields = { ...req.body };
 
-        if (updateFields.openingHours) {
-            try {
-                updateFields.openingHours = JSON.parse(updateFields.openingHours);
-            } catch (e) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Invalid JSON in openingHours',
-                    error: e.message
-                });
-            }
-        }
+        // if (updateFields.openingHours) {
+        //     try {
+        //         updateFields.openingHours = JSON.parse(updateFields.openingHours);
+        //     } catch (e) {
+        //         return res.status(400).json({
+        //             success: false,
+        //             message: 'Invalid JSON in openingHours',
+        //             error: e.message
+        //         });
+        //     }
+        // }
 
         if (req.files?.logo) {
             const newLogo = req.files.logo[0].filename;

@@ -34,4 +34,6 @@ router.post('/getGuestById/:id', guestController.getGuestById);
 router.post('/updateGuest/:id', updateGuestValidator, validate, guestController.updateGuest);
 router.post('/deleteGuest/:id', guestController.deleteGuest);
 
+router.post('/updateGuestStatus', guestController.updateGuestStatus);
+
 module.exports = router;

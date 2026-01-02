@@ -2,42 +2,40 @@ const { body } = require("express-validator");
 
 exports.blockValidator = [
     body("restaurantId")
-        .notEmpty()
-        .withMessage("restaurantId is required")
-        .isMongoId()
-        .withMessage("Invalid restaurantId"),
+        .notEmpty().withMessage("restaurantId is required")
+        .isMongoId().withMessage("Invalid restaurantId"),
 
     body("reason")
-        .notEmpty()
-        .withMessage("reason is required"),
+        .notEmpty().withMessage("reason is required")
+        .isIn(["Maintenance", "Closed", "Day Off"])
+        .withMessage("Invalid reason"),
 
+    body("status")
+        .optional()
+        .isIn(["Draft", "Active"])
+        .withMessage("status must be Draft or Active"),
+
+    // startDate & endDate only REQUIRED if status !== Draft
     body("startDate")
-        .notEmpty()
-        .withMessage("startDate is required")
-        .isISO8601()
-        .withMessage("startDate must be a valid date"),
+        .if(body("status").not().equals("Draft"))
+        .notEmpty().withMessage("startDate is required")
+        .isISO8601().withMessage("Invalid startDate"),
 
     body("endDate")
-        .notEmpty()
-        .withMessage("endDate is required")
-        .isISO8601()
-        .withMessage("endDate must be a valid date"),
+        .if(body("status").not().equals("Draft"))
+        .notEmpty().withMessage("endDate is required")
+        .isISO8601().withMessage("Invalid endDate"),
 
-    // CASE 1: Full Restaurant Block
     body("isFullRestaurantBlock")
         .optional()
-        .isBoolean()
-        .withMessage("isFullRestaurantBlock must be boolean"),
+        .isBoolean().withMessage("isFullRestaurantBlock must be boolean"),
 
-    // CASE 2: Room Block
     body("roomName")
         .optional()
         .isString()
-        .withMessage("Block name is required")
         .isLength({ min: 3, max: 60 })
         .withMessage("roomName must be between 3 and 60 characters"),
 
-    // CASE 3: Table Block
     body("tableIds")
         .optional()
         .isArray()
@@ -46,13 +44,13 @@ exports.blockValidator = [
     body("tableIds.*")
         .optional()
         .isMongoId()
-        .withMessage("Each tableId must be valid"),
+        .withMessage("Invalid tableId"),
 
-    // Shift IDs
     body("shiftIds")
         .optional()
         .isArray()
         .withMessage("shiftIds must be an array"),
+
     body("shiftIds.*")
         .optional()
         .isMongoId()
@@ -65,46 +63,43 @@ exports.blockValidator = [
 
     body("note")
         .optional()
-        .isString()
-        .withMessage("note must be string"),
+        .isString(),
 
-    // Custom Validation Logic
-    body()
-        .custom((value) => {
-            const { isFullRestaurantBlock, roomName, tableIds } = value;
+    body().custom((value) => {
+        const { status, isFullRestaurantBlock, roomName, tableIds } = value;
 
-            if (isFullRestaurantBlock) return true; // No need for tables or room
+        if (status === "Draft") return true;
 
-            if (roomName) return true; // Room block valid
+        if (isFullRestaurantBlock) return true;
+        if (roomName) return true;
+        if (tableIds && tableIds.length > 0) return true;
 
-            if (tableIds && tableIds.length > 0) return true; // Table block valid
-
-            throw new Error(
-                "Provide either isFullRestaurantBlock=true OR roomName OR tableIds[]"
-            );
-        })
+        throw new Error(
+            "Provide isFullRestaurantBlock=true OR roomName OR tableIds[]"
+        );
+    }),
 ];
 
 
 exports.updateBlockValidator = [
-    body("restaurantId")
-        .optional()
-        .isMongoId()
-        .withMessage("Invalid restaurantId"),
+    body("restaurantId").optional().isMongoId(),
 
     body("reason")
         .optional()
-        .isString(),
+        .isIn(["Maintenance", "Closed", "Day Off"]),
+
+    body("status")
+        .optional()
+        .isIn(["Draft", "Active", "Ended"])
+        .withMessage("Invalid status"),
 
     body("startDate")
         .optional()
-        .isISO8601()
-        .withMessage("startDate must be valid date"),
+        .isISO8601(),
 
     body("endDate")
         .optional()
-        .isISO8601()
-        .withMessage("endDate must be valid date"),
+        .isISO8601(),
 
     body("isFullRestaurantBlock")
         .optional()

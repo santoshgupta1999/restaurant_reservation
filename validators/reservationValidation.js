@@ -15,11 +15,14 @@ exports.reservationValidator = [
 
     body("firstName").notEmpty().withMessage("first name is required."),
     body("lastName").notEmpty().withMessage("last name is required."),
-    body("guestEmail").isEmail().withMessage("Invalid email."),
+    body("guestEmail")
+        .optional({ checkFalsy: true })
+        .isEmail()
+        .withMessage("Invalid email."),
+
     body("guestPhone")
+        .optional({ checkFalsy: true })
         .trim()
-        .notEmpty()
-        .withMessage("Phone number is required.")
         .custom((value) => {
             const digitsOnly = value.replace(/[\s-]/g, "");
 

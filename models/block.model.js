@@ -10,7 +10,13 @@ const blockSchema = new mongoose.Schema(
 
         reason: {
             type: String,
-            required: true 
+            required: true
+        },
+
+        status: {
+            type: String,
+            enum: ["Draft", "Active", "Ended"],
+            default: "Active"
         },
 
         isFullRestaurantBlock: {
@@ -34,12 +40,16 @@ const blockSchema = new mongoose.Schema(
 
         startDate: {
             type: Date,
-            required: true
+            required: function () {
+                return this.status !== "Draft";
+            }
         },
 
         endDate: {
             type: Date,
-            required: true
+            required: function () {
+                return this.status !== "Draft";
+            }
         },
 
         daysActive: [
