@@ -6,6 +6,7 @@ const UserOtp = require('../models/userOtp.js');
 const sendMail = require('../utils/mailer.js');
 const path = require('path');
 const fs = require('fs');
+const mongoose = require('mongoose');
 const BlacklistToken = require("../models/blacklistToken.model");
 
 
@@ -140,7 +141,7 @@ exports.getProfile = async (req, res) => {
         if (!userId) {
             return res.status(401).json({
                 success: false,
-                message: "Unauthorized: Invalid token or user not found.",
+                message: "Unauthorized: Invalid token or user not found."
             });
         }
 
@@ -148,12 +149,13 @@ exports.getProfile = async (req, res) => {
         if (!user) {
             return res.status(404).json({
                 success: false,
-                message: "User not found.",
+                message: "User not found."
             });
         }
 
+        const host = `${req.protocol}://${req.get("host")}`;
         const imageUrl = user.profileImage
-            ? `uploads/users/${user.profileImage}`
+            ? `${host}/restaurant_reservation/uploads/users/${user.profileImage}`
             : null;
 
         return res.status(200).json({
@@ -167,8 +169,8 @@ exports.getProfile = async (req, res) => {
                 role: user.role,
                 isActive: user.isActive,
                 lastLogin: user.lastLogin ? user.lastLogin.toISOString() : null,
-                imageUrl,
-            },
+                imageUrl
+            }
         });
 
     } catch (err) {
@@ -176,7 +178,7 @@ exports.getProfile = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Error fetching profile",
-            error: err.message,
+            error: err.message
         });
     }
 };
@@ -666,6 +668,180 @@ exports.deleteUser = async (req, res) => {
             success: false,
             message: "Error deleting user",
             error: error.message
+        });
+    }
+};
+
+exports.getManagers = async (req, res) => {
+    try {
+        const { restaurantId } = req.query;
+
+        const filter = {
+            role: "manager",
+            isActive: true
+        };
+
+        // Optional restaurant filter
+        if (restaurantId) {
+            if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid restaurantId"
+                });
+            }
+
+            filter.restaurantId = restaurantId;
+        }
+
+        const managers = await User.find(filter)
+            .select("-password")
+            .populate("restaurantId", "name email phone");
+
+        if (!managers.length) {
+            return res.status(404).json({
+                success: false,
+                message: restaurantId
+                    ? "No managers found for this restaurant"
+                    : "No managers found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Managers fetched successfully",
+            count: managers.length,
+            data: managers
+        });
+
+    } catch (error) {
+        console.error("Error fetching managers:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching managers",
+            error: error.message
+        });
+    }
+};
+
+exports.getStaffs = async (req, res) => {
+    try {
+        const { restaurantId } = req.query;
+
+        const filter = {
+            role: "host",
+            isActive: true
+        };
+
+        // Optional restaurant filter
+        if (restaurantId) {
+            if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid restaurantId"
+                });
+            }
+
+            filter.restaurantId = restaurantId;
+        }
+
+        const managers = await User.find(filter)
+            .select("-password")
+            .populate("restaurantId", "name email phone");
+
+        if (!managers.length) {
+            return res.status(404).json({
+                success: false,
+                message: restaurantId
+                    ? "No staffs found for this restaurant"
+                    : "No staffs found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Staffs fetched successfully",
+            count: managers.length,
+            data: managers
+        });
+
+    } catch (error) {
+        console.error("Error fetching staffs:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching staffs",
+            error: error.message
+        });
+    }
+};
+
+exports.updateUsersById = async (req, res) => {
+    try {
+        const { id, name, phone, email, restaurantId } = req.body;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "userId is required",
+            });
+        }
+
+        const user = await User.findById(id);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found.",
+            });
+        }
+
+        let newImage = user.profileImage;
+
+        if (req.file) {
+            newImage = req.file.filename;
+
+            // delete old image
+            if (user.profileImage) {
+                const oldPath = path.join(
+                    __dirname,
+                    "../uploads/users",
+                    user.profileImage
+                );
+
+                if (fs.existsSync(oldPath)) {
+                    fs.unlinkSync(oldPath);
+                }
+            }
+        }
+
+        user.name = name || user.name;
+        user.phone = phone || user.phone;
+        user.email = email || user.email;
+        user.restaurantId = restaurantId || user.restaurantId;
+        user.profileImage = newImage;
+
+        await user.save();
+
+        const imageUrl = user.profileImage
+            ? `${req.protocol}://${req.get("host")}/uploads/users/${user.profileImage}`
+            : null;
+
+        return res.status(200).json({
+            success: true,
+            message: "Profile updated successfully",
+            data: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                phone: user.phone,
+                role: user.role,
+                imageUrl,
+            },
+        });
+    } catch (error) {
+        console.error("Error updating profile:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error updating profile",
+            error: error.message,
         });
     }
 };

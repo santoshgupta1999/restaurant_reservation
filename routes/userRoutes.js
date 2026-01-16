@@ -12,7 +12,11 @@ const {
     updateUserStatus,
     getAllUsers,
     getUserById,
-    deleteUser
+    deleteUser,
+    getManagers,
+    updateManagerById,
+    getStaffs,
+    updateUsersById
 } = require("../controllers/user.controllers.js");
 
 const { registerValidator, loginValidator, updateProfileValidator, } = require("../validators/userValidation.js");
@@ -44,5 +48,11 @@ router.get('/getNotifications', notificationController.getNotifications);
 router.put('/updateNotificationStatus/:id', notificationController.updateNotificationStatus);
 router.delete('/deleteNotification/:id', notificationController.deleteNotification);
 router.put('/markAllAsRead', verifyToken, notificationController.markAllAsRead);
+
+router.post('/getManagers', getManagers);
+router.post('/getStaffs', getStaffs);
+
+router.post('/updateUsersById', upload.single('profile'),
+    updateProfileValidator, validate, updateUsersById);
 
 module.exports = router;

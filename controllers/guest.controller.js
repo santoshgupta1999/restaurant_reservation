@@ -3,19 +3,80 @@ const Guest = require("../models/guest.model");
 
 exports.createGuest = async (req, res) => {
     try {
-        const guest = new Guest(req.body);
-        await guest.save();
+        const {
+            restaurantId,
+            firstName,
+            lastName,
+            gender,
+            dob,
+            email,
+            phone,
+            notes,
+            tags,
+            jobTitle,
+            company
+        } = req.body;
+
+        if (!restaurantId || !firstName) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId and firstName are required"
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid restaurantId"
+            });
+        }
+
+        let existingGuest = null;
+
+        if (phone) {
+            existingGuest = await Guest.findOne({ restaurantId, phone });
+        }
+
+        if (!existingGuest && email) {
+            existingGuest = await Guest.findOne({
+                restaurantId,
+                email: email.toLowerCase()
+            });
+        }
+
+        if (existingGuest) {
+            return res.status(409).json({
+                success: false,
+                message: "Guest already exists for this restaurant",
+                data: existingGuest
+            });
+        }
+
+        const guest = await Guest.create({
+            restaurantId,
+            firstName,
+            lastName,
+            gender,
+            dob,
+            email,
+            phone,
+            notes,
+            tags,
+            jobTitle,
+            company
+        });
 
         return res.status(201).json({
             success: true,
             message: "Guest created successfully",
-            data: guest,
+            data: guest
         });
+
     } catch (error) {
-        console.error("Error creating guest:", error);
-        res.status(500).json({
+        console.error("Create guest error:", error);
+        return res.status(500).json({
             success: false,
-            message: "Error creating guests",
+            message: "Error creating guest",
             error: error.message
         });
     }
@@ -23,42 +84,85 @@ exports.createGuest = async (req, res) => {
 
 exports.getGuests = async (req, res) => {
     try {
-        const { page = 1, limit = 10, keyword, sortBy = "createdAt", order = "desc", isActive } = req.query;
+        const {
+            restaurantId,
+            page = 1,
+            limit = 10,
+            search,
+            isActive,
+            tags,
+            sortBy = "createdAt",
+            order = "desc"
+        } = req.body || {};
 
-        const filter = {};
+        if (!restaurantId) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId is required"
+            });
+        }
 
-        if (keyword) {
+        if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid restaurantId"
+            });
+        }
+
+        const skip = (Number(page) - 1) * Number(limit);
+
+        let filter = {
+            restaurantId
+        };
+
+        // 🔹 Active / Inactive filter
+        if (isActive !== undefined) {
+            filter.isActive = isActive;
+        }
+
+        // 🔹 Tags filter
+        if (tags && tags.length) {
+            filter.tags = { $in: tags };
+        }
+
+        // 🔹 Global Search
+        if (search) {
             filter.$or = [
-                { firstName: { $regex: keyword, $options: "i" } },
-                { lastName: { $regex: keyword, $options: "i" } },
-                { email: { $regex: keyword, $options: "i" } },
-                { phone: { $regex: keyword, $options: "i" } },
+                { firstName: { $regex: search, $options: "i" } },
+                { lastName: { $regex: search, $options: "i" } },
+                { email: { $regex: search, $options: "i" } },
+                { phone: { $regex: search, $options: "i" } }
             ];
         }
 
-        if (isActive !== undefined) filter.isActive = isActive === "true";
-
+        // 🔹 Sorting
         const sortOrder = order === "asc" ? 1 : -1;
+        const sort = { [sortBy]: sortOrder };
 
-        const guests = await Guest.find(filter)
-            .sort({ [sortBy]: sortOrder })
-            .skip((page - 1) * limit)
-            .limit(Number(limit));
+        const [guests, total] = await Promise.all([
+            Guest.find(filter)
+                .sort(sort)
+                .skip(skip)
+                .limit(Number(limit)),
 
-        const total = await Guest.countDocuments(filter);
+            Guest.countDocuments(filter)
+        ]);
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
-            message: "Guests fetched successfully",
-            total,
-            page: Number(page),
-            limit: Number(limit),
+            message: "Guest list fetched successfully",
             data: guests,
+            pagination: {
+                totalRecords: total,
+                currentPage: Number(page),
+                totalPages: Math.ceil(total / limit),
+                limit: Number(limit)
+            }
         });
 
     } catch (error) {
-        console.error("Error fetching guests:", error);
-        res.status(500).json({
+        console.error("Get guests error:", error);
+        return res.status(500).json({
             success: false,
             message: "Error fetching guests",
             error: error.message
@@ -68,7 +172,23 @@ exports.getGuests = async (req, res) => {
 
 exports.getGuestById = async (req, res) => {
     try {
-        const guest = await Guest.findById(req.params.id);
+        const { id } = req.params;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "guestId is required"
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid guestId"
+            });
+        }
+
+        const guest = await Guest.findById(id);
 
         if (!guest) {
             return res.status(404).json({
@@ -77,15 +197,15 @@ exports.getGuestById = async (req, res) => {
             });
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: "Guest fetched successfully",
-            data: guest,
+            data: guest
         });
 
     } catch (error) {
-        console.error("Error fetching guest:", error);
-        res.status(500).json({
+        console.error("Get guest by id error:", error);
+        return res.status(500).json({
             success: false,
             message: "Error fetching guest",
             error: error.message
@@ -95,24 +215,73 @@ exports.getGuestById = async (req, res) => {
 
 exports.updateGuest = async (req, res) => {
     try {
-        const guest = await Guest.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        const { id } = req.params;
 
-        if (!guest) {
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "guestId is required"
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid guestId"
+            });
+        }
+
+        const allowedFields = [
+            "firstName",
+            "lastName",
+            "gender",
+            "dob",
+            "email",
+            "phone",
+            "notes",
+            "tags",
+            "jobTitle",
+            "company",
+            "isActive"
+        ];
+
+        const updateData = {};
+
+        allowedFields.forEach(field => {
+            if (req.body[field] !== undefined) {
+                updateData[field] = req.body[field];
+            }
+        });
+
+        if (!Object.keys(updateData).length) {
+            return res.status(400).json({
+                success: false,
+                message: "No valid fields provided for update"
+            });
+        }
+
+        const updatedGuest = await Guest.findByIdAndUpdate(
+            id,
+            { $set: updateData },
+            { new: true }
+        );
+
+        if (!updatedGuest) {
             return res.status(404).json({
                 success: false,
                 message: "Guest not found"
             });
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: "Guest updated successfully",
-            data: guest,
+            data: updatedGuest
         });
 
     } catch (error) {
-        console.error("Error updating guest:", error);
-        res.status(500).json({
+        console.error("Update guest error:", error);
+        return res.status(500).json({
             success: false,
             message: "Error updating guest",
             error: error.message

@@ -2,6 +2,7 @@ const Reservation = require('../models/reservation.model');
 const Shift = require('../models/shift.model');
 const Table = require('../models/table.model');
 const User = require('../models/user.model');
+const Guest = require('../models/guest.model');
 const Restaurant = require('../models/restaurant.model');
 const mongoose = require('mongoose');
 // const sendSMS = require('../utils/sendSMS'); // <-- optional SMS helper
@@ -18,21 +19,22 @@ exports.createReservation = async (req, res) => {
         const {
             restaurantId,
             tableId,
+
+            // Guest fields
             firstName,
             lastName,
             guestEmail,
             guestPhone,
             dob,
+
+            // Reservation fields
             date,
             time,
             partySize,
             source,
             status,
             seating,
-            tag,
-            constraint,
-            logistic,
-            behavior,
+            tags,
             notes
         } = req.body;
 
@@ -44,7 +46,13 @@ exports.createReservation = async (req, res) => {
         }
 
         const reservationDate = new Date(date);
-        const weekdayName = reservationDate.toLocaleDateString("en-US", { weekday: "long" });
+        const weekdayName = reservationDate.toLocaleDateString("en-US", {
+            weekday: "long"
+        });
+
+        /* ---------------------------------------------------
+           🔹 SHIFT LOGIC (UNCHANGED)
+        --------------------------------------------------- */
 
         const allShifts = await Shift.find({
             restaurantId,
@@ -69,7 +77,6 @@ exports.createReservation = async (req, res) => {
             });
         }
 
-        // Convert time to minutes
         const [hh, mm] = time.split(":").map(Number);
         const reservationMinutes = hh * 60 + mm;
 
@@ -91,7 +98,6 @@ exports.createReservation = async (req, res) => {
             allShifts.forEach(s => {
                 const start = convertToMinutes(s.startTime);
                 const diff = Math.abs(reservationMinutes - start);
-
                 if (diff < minDiff) {
                     minDiff = diff;
                     nearestShift = s;
@@ -108,13 +114,17 @@ exports.createReservation = async (req, res) => {
             shift = nearestShift;
         }
 
+        /* ---------------------------------------------------
+           🔹 TABLE AVAILABILITY CHECK
+        --------------------------------------------------- */
+
         if (tableId) {
             const existing = await Reservation.findOne({
                 restaurantId,
                 tableId,
-                date: new Date(date),
+                date: reservationDate,
                 time,
-                status: { $nin: ["Canceled", "No-show"] }
+                status: { $nin: ["Cancelled", "No-show"] }
             });
 
             if (existing) {
@@ -125,40 +135,87 @@ exports.createReservation = async (req, res) => {
             }
         }
 
-        const newReservation = new Reservation({
+        /* ---------------------------------------------------
+           🔹 CREATE / UPDATE GUEST (🔥 MAIN ADDITION)
+        --------------------------------------------------- */
+
+        let guest = null;
+
+        if (guestPhone) {
+            guest = await Guest.findOne({ restaurantId, phone: guestPhone });
+        }
+
+        if (!guest && guestEmail) {
+            guest = await Guest.findOne({
+                restaurantId,
+                email: guestEmail.toLowerCase()
+            });
+        }
+
+        if (guest) {
+            // update existing guest
+            guest.firstName = firstName || guest.firstName;
+            guest.lastName = lastName || guest.lastName;
+            guest.phone = guestPhone || guest.phone;
+            guest.email = guestEmail || guest.email;
+            guest.dob = dob || guest.dob;
+
+            if (tags?.length) {
+                guest.tags = [...new Set([...guest.tags, ...tags])];
+            }
+
+            await guest.save();
+        } else {
+            // create new guest
+            guest = await Guest.create({
+                restaurantId,
+                firstName,
+                lastName,
+                phone: guestPhone,
+                email: guestEmail,
+                dob,
+                tags,
+                notes
+            });
+        }
+
+        /* ---------------------------------------------------
+           🔹 CREATE RESERVATION
+        --------------------------------------------------- */
+
+        const newReservation = await Reservation.create({
             restaurantId,
+            guestId: guest._id,
             tableId,
             shiftId: shift._id,
-            firstName,
-            lastName,
-            guestEmail,
-            guestPhone,
-            dob,
             date: reservationDate,
             time,
             partySize,
             source,
             status,
             seating,
-            tag,
-            constraint,
-            logistic,
-            behavior,
+            tags,
             notes
         });
 
-        await newReservation.save();
+        // 🔹 Update upcoming visit in Guest
+        await Guest.findByIdAndUpdate(guest._id, {
+            upcomingVisitAt: reservationDate
+        });
 
         return res.status(201).json({
             success: true,
             message: "Reservation created successfully.",
             assignedShift: shift.name,
-            data: newReservation
+            data: {
+                reservation: newReservation,
+                guest
+            }
         });
 
     } catch (error) {
         console.error("Error creating reservation:", error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Error creating reservation.",
             error: error.message
@@ -168,52 +225,79 @@ exports.createReservation = async (req, res) => {
 
 exports.getReservations = async (req, res) => {
     try {
-        const { restaurantId, date } = req.query;
+        const {
+            restaurantId,
+            date,
+            status,
+            source
+        } = req.body;
 
-        if (!restaurantId) {
+        if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) {
             return res.status(400).json({
                 success: false,
-                message: "restaurantId is required"
+                message: "Valid restaurantId is required"
             });
         }
 
-        const query = { restaurantId };
+        const query = {
+            restaurantId: new mongoose.Types.ObjectId(restaurantId)
+        };
 
+        /* ---------------- DATE FILTER ---------------- */
         if (date) {
-            const parsedDate = new Date(date);
-            if (isNaN(parsedDate)) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid date format. Use YYYY-MM-DD"
-                });
-            }
+            const d = new Date(date);
 
-            const start = new Date(parsedDate.setHours(0, 0, 0, 0));
-            const end = new Date(parsedDate.setHours(23, 59, 59, 999));
+            const start = new Date(d);
+            start.setHours(0, 0, 0, 0);
+
+            const end = new Date(d);
+            end.setHours(23, 59, 59, 999);
 
             query.date = { $gte: start, $lte: end };
         }
 
+        /* ---------------- STATUS FILTER ---------------- */
+        if (status) {
+            query.status = status;
+        }
+
+        /* ---------------- SOURCE FILTER ---------------- */
+        if (source) {
+            query.source = source;
+        }
+
         const reservations = await Reservation.find(query)
-            .populate("restaurantId", "name email phone")
-            .populate("tableId", "tableNumber roomName capacity")
+            .populate({
+                path: "guestId",
+                select: `
+                    firstName
+                    lastName
+                    gender
+                    dob
+                    email
+                    phone
+                    tags
+                    notes
+                    totalVisits
+                    lastVisitAt
+                    upcomingVisitAt
+                    isActive
+                `
+            })
+            .populate({
+                path: "tableId",
+                select: "tableNumber roomName capacity"
+            })
             .populate({
                 path: "shiftId",
                 select: "name startTime endTime type"
             })
-            .sort({ time: 1 });
-
-        if (date && reservations.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: `No reservations found for date ${date}`
-            });
-        }
+            .sort({ date: 1, time: 1 });
 
         return res.status(200).json({
             success: true,
             message: "Reservations fetched successfully",
-            count: reservations.length,
+            total: reservations.length,
             data: reservations
         });
 
@@ -286,129 +370,125 @@ exports.updateReservationById = async (req, res) => {
             });
         }
 
-        // If date or time is updated → re-evaluate shift
-        let shiftId = reservation.shiftId;
+        /* ================= GUEST HANDLING ================= */
+        let guest = await Guest.findById(reservation.guestId);
+
+        const guestPayload = {
+            restaurantId: reservation.restaurantId,
+            firstName: updateData.firstName,
+            lastName: updateData.lastName,
+            gender: updateData.gender,
+            dob: updateData.dob,
+            email: updateData.email,
+            phone: updateData.phone,
+            notes: updateData.notes,
+            tags: updateData.tags
+        };
+
+        const isGuestChanged =
+            (updateData.phone && updateData.phone !== guest.phone) ||
+            (updateData.email && updateData.email !== guest.email);
+
+        if (isGuestChanged) {
+            guest = await Guest.create(guestPayload);
+            updateData.guestId = guest._id;
+        } else {
+            await Guest.findByIdAndUpdate(
+                guest._id,
+                guestPayload,
+                { runValidators: true }
+            );
+        }
+
+        /* ================= SHIFT LOGIC (SAME AS CREATE) ================= */
+        const finalDate = updateData.date
+            ? new Date(updateData.date)
+            : reservation.date;
+
+        const finalTime = updateData.time || reservation.time;
 
         if (updateData.date || updateData.time) {
-            const reservationDate = updateData.date
-                ? new Date(updateData.date)
-                : reservation.date;
-
-            const time = updateData.time || reservation.time;
-
-            const weekdayName = reservationDate.toLocaleDateString("en-US", {
+            const weekdayName = finalDate.toLocaleDateString("en-US", {
                 weekday: "long"
             });
 
-            const allShifts = await Shift.find({
+            const shifts = await Shift.find({
                 restaurantId: reservation.restaurantId,
                 isActive: true,
                 $or: [
-                    {
-                        type: "Recurring",
-                        daysActive: { $in: [weekdayName] }
-                    },
-                    {
-                        type: "Special",
-                        startDate: { $lte: reservationDate },
-                        endDate: { $gte: reservationDate }
-                    }
+                    { type: "Recurring", daysActive: { $in: [weekdayName] } },
+                    { type: "Special", startDate: { $lte: finalDate }, endDate: { $gte: finalDate } }
                 ]
             });
 
-            if (!allShifts.length) {
-                return res.status(400).json({
-                    success: false,
-                    message: "No shifts available for this day."
-                });
-            }
-
-            const convertToMinutes = (t) => {
+            const toMinutes = t => {
                 const [h, m] = t.split(":").map(Number);
                 return h * 60 + m;
             };
 
-            const reservationMinutes = convertToMinutes(time);
+            const resMin = toMinutes(finalTime);
 
-            let matchedShift = allShifts.find(s => {
-                const start = convertToMinutes(s.startTime);
-                const end = convertToMinutes(s.endTime);
-                return reservationMinutes >= start && reservationMinutes < end;
+            const matchedShift = shifts.find(s => {
+                return resMin >= toMinutes(s.startTime) &&
+                    resMin < toMinutes(s.endTime);
             });
 
             if (!matchedShift) {
-                let nearestShift = null;
-                let minDiff = Infinity;
-
-                allShifts.forEach(s => {
-                    const diff = Math.abs(
-                        reservationMinutes - convertToMinutes(s.startTime)
-                    );
-                    if (diff < minDiff) {
-                        minDiff = diff;
-                        nearestShift = s;
-                    }
+                return res.status(400).json({
+                    success: false,
+                    message: "Reservation time does not match any shift."
                 });
-
-                if (minDiff > 60) {
-                    return res.status(400).json({
-                        success: false,
-                        message: "Reservation time is outside all shift timings."
-                    });
-                }
-
-                matchedShift = nearestShift;
             }
 
-            shiftId = matchedShift._id;
-            updateData.shiftId = shiftId;
-            updateData.date = reservationDate;
+            updateData.shiftId = matchedShift._id;
+            updateData.date = finalDate;
+            updateData.time = finalTime;
         }
 
-        // Table availability check (if tableId/date/time changes)
+        /* ================= TABLE AVAILABILITY ================= */
         if (updateData.tableId || updateData.date || updateData.time) {
-            const tableId = updateData.tableId || reservation.tableId;
-            const date = updateData.date || reservation.date;
-            const time = updateData.time || reservation.time;
+            const clash = await Reservation.findOne({
+                _id: { $ne: id },
+                restaurantId: reservation.restaurantId,
+                tableId: updateData.tableId || reservation.tableId,
+                date: finalDate,
+                time: finalTime,
+                status: { $nin: ["Canceled", "No-show"] }
+            });
 
-            if (tableId) {
-                const existing = await Reservation.findOne({
-                    _id: { $ne: id },
-                    restaurantId: reservation.restaurantId,
-                    tableId,
-                    date,
-                    time,
-                    status: { $nin: ["Canceled", "No-show"] }
+            if (clash) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Table already reserved for this time."
                 });
-
-                if (existing) {
-                    return res.status(400).json({
-                        success: false,
-                        message: "This table is already reserved for the selected date & time."
-                    });
-                }
             }
         }
 
+        /* ================= UPDATE RESERVATION ================= */
         const updatedReservation = await Reservation.findByIdAndUpdate(
             id,
             updateData,
             { new: true, runValidators: true }
-        )
+        );
+
+        const populatedReservation = await Reservation.findById(updatedReservation._id)
             .populate("restaurantId", "name phone")
             .populate("tableId", "tableNumber roomName capacity")
-            .populate("shiftId", "name startTime endTime");
+            .populate("shiftId", "name startTime endTime type");
 
         return res.status(200).json({
             success: true,
             message: "Reservation updated successfully.",
-            assignedShift: updatedReservation.shiftId?.name,
-            data: updatedReservation
+            assignedShift: populatedReservation.shiftId?.name,
+            data: {
+                reservation: populatedReservation,
+                guest
+            }
         });
 
     } catch (error) {
-        console.error("Error updating reservation:", error);
-        res.status(500).json({
+        console.error("Update reservation error:", error);
+        return res.status(500).json({
             success: false,
             message: "Error updating reservation.",
             error: error.message
@@ -496,6 +576,277 @@ exports.deleteReservationById = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Error deleting reservation.",
+            error: error.message
+        });
+    }
+};
+
+exports.getDashboardOverview = async (req, res) => {
+    try {
+        const user = req.user;
+
+        let matchQuery = {};
+        let totalRestaurants = 0;
+
+        /* ================= ADMIN ================= */
+        if (user.role === "admin") {
+            totalRestaurants = await Restaurant.countDocuments({});
+        }
+        /* ================= RESTAURANT USER ================= */
+        else {
+            if (!user.restaurantId) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Restaurant not linked with this user"
+                });
+            }
+
+            matchQuery.restaurantId = new mongoose.Types.ObjectId(user.restaurantId);
+            totalRestaurants = 1;
+        }
+
+        const [
+            totalReservations,
+            totalConfirmed,
+            totalPending,
+            totalGuestsServed
+        ] = await Promise.all([
+
+            /* -------- Reservations -------- */
+            Reservation.countDocuments(matchQuery),
+
+            Reservation.countDocuments({
+                ...matchQuery,
+                status: "Confirmed"
+            }),
+
+            Reservation.countDocuments({
+                ...matchQuery,
+                status: "Pending"
+            }),
+
+            /* -------- Guests (TOTAL COUNT) -------- */
+            Guest.countDocuments(matchQuery)
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            message: "Dashboard data fetched successfully",
+            data: {
+                totalReservations,
+                totalRestaurants,
+                totalConfirmed,
+                totalPending,
+                totalGuestsServed
+            }
+        });
+
+    } catch (error) {
+        console.error("Dashboard API error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching dashboard data",
+            error: error.message
+        });
+    }
+};
+
+exports.getMonthlyGraph = async (req, res) => {
+    try {
+        const user = req.user;
+        const { restaurantId, startDate, endDate } = req.body;
+
+        let matchQuery = {};
+
+        /* ================= ADMIN ================= */
+        if (user.role === "admin") {
+
+            if (restaurantId) {
+                if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Invalid restaurantId"
+                    });
+                }
+                matchQuery.restaurantId = new mongoose.Types.ObjectId(restaurantId);
+            }
+
+        }
+        /* ================= RESTAURANT USER ================= */
+        else {
+            if (!user.restaurantId) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Restaurant not linked with this user"
+                });
+            }
+            matchQuery.restaurantId = new mongoose.Types.ObjectId(user.restaurantId);
+        }
+
+        /* ================= DATE FILTER ================= */
+        if (startDate || endDate) {
+            matchQuery.createdAt = {};
+
+            if (startDate) {
+                matchQuery.createdAt.$gte = new Date(startDate);
+            }
+
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999); // poora din cover
+                matchQuery.createdAt.$lte = end;
+            }
+        }
+
+        const data = await Reservation.aggregate([
+            { $match: matchQuery },
+            {
+                $group: {
+                    _id: { $month: "$createdAt" },
+
+                    confirmed: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "Confirmed"] }, 1, 0]
+                        }
+                    },
+
+                    cancelled: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "Canceled"] }, 1, 0]
+                        }
+                    },
+
+                    revenue: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "Confirmed"] }, "$totalAmount", 0]
+                        }
+                    }
+                }
+            },
+            { $sort: { "_id": 1 } }
+        ]);
+
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+        const formatted = months.map((month, index) => {
+            const found = data.find(d => d._id === index + 1);
+            return {
+                month,
+                confirmed: found?.confirmed || 0,
+                cancelled: found?.cancelled || 0,
+                revenue: found?.revenue || 0
+            };
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Monthly reservation performance fetched successfully",
+            data: formatted
+        });
+
+    } catch (error) {
+        console.error("Monthly performance API error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching monthly performance",
+            error: error.message
+        });
+    }
+};
+
+exports.getReservationList = async (req, res) => {
+    try {
+        const {
+            page = 1,
+            limit = 10,
+            search,
+            restaurantId,
+            status,
+            source,
+            seating,
+            shiftId,
+            fromDate,
+            toDate,
+            partySize
+        } = req.body;
+
+        const skip = (page - 1) * limit;
+
+        let filter = {};
+
+        // 🔹 Filters
+        if (restaurantId && mongoose.Types.ObjectId.isValid(restaurantId)) {
+            filter.restaurantId = restaurantId;
+        }
+
+        if (status) {
+            filter.status = status;
+        }
+
+        if (source) {
+            filter.source = source;
+        }
+
+        if (seating) {
+            filter.seating = seating;
+        }
+
+        if (shiftId && mongoose.Types.ObjectId.isValid(shiftId)) {
+            filter.shiftId = shiftId;
+        }
+
+        if (partySize) {
+            filter.partySize = partySize;
+        }
+
+        // 🔹 Date Range Filter
+        if (fromDate || toDate) {
+            filter.date = {};
+            if (fromDate) filter.date.$gte = new Date(fromDate);
+            if (toDate) filter.date.$lte = new Date(toDate);
+        }
+
+        // 🔹 Global Search
+        if (search) {
+            filter.$or = [
+                { firstName: { $regex: search, $options: "i" } },
+                { lastName: { $regex: search, $options: "i" } },
+                { guestEmail: { $regex: search, $options: "i" } },
+                { guestPhone: { $regex: search, $options: "i" } },
+                { notes: { $regex: search, $options: "i" } },
+                { tags: { $in: [new RegExp(search, "i")] } }
+            ];
+        }
+
+        const [reservations, total] = await Promise.all([
+            Reservation.find(filter)
+                .populate("restaurantId", "name email phone")
+                .populate("tableId", "tableNumber")
+                .populate("shiftId", "name startTime endTime")
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(parseInt(limit)),
+
+            Reservation.countDocuments(filter)
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            message: "Reservation list fetched successfully",
+            data: reservations,
+            pagination: {
+                totalRecords: total,
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(total / limit),
+                limit: parseInt(limit)
+            }
+        });
+
+    } catch (error) {
+        console.error("Admin reservation list error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch reservations",
             error: error.message
         });
     }

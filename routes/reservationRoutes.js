@@ -14,7 +14,7 @@ router.post('/add',
     reservController.createReservation
 );
 
-router.get('/', reservController.getReservations);
+router.post('/', reservController.getReservations);
 router.get('/:id', reservController.getReservationById);
 
 router.put('/update/:id',
@@ -25,5 +25,9 @@ router.put('/update/:id',
 
 router.delete('/:id', reservController.deleteReservationById);
 router.post('/status/:id', reservController.updateReservationStatus);
+
+router.post("/getDashboardOverview", verifyToken, reservController.getDashboardOverview)
+router.post("/getReservationList", reservController.getReservationList)
+router.post("/getMonthlyGraph", verifyToken, reservController.getMonthlyGraph)
 
 module.exports = router;

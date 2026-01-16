@@ -6,6 +6,10 @@ const reservationSchema = new mongoose.Schema({
         ref: "Restaurant",
         required: true
     },
+    guestId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Guest",
+    },
     tableId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Table"
@@ -13,23 +17,6 @@ const reservationSchema = new mongoose.Schema({
     shiftId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Shift"
-    },
-    firstName: {
-        type: String,
-        required: true
-    },
-    lastName: {
-        type: String,
-        required: true
-    },
-    guestEmail: {
-        type: String
-    },
-    guestPhone: {
-        type: String
-    },
-    dob: {
-        type: Date
     },
     date: {
         type: Date,
@@ -57,18 +44,6 @@ const reservationSchema = new mongoose.Schema({
         type: String,
         enum: ["Any", "Outdoor", "Indoor", "Non Smoking", "Window"],
         default: "Any"
-    },
-    tag: {
-        type: String
-    },
-    constraint: {
-        type: String
-    },
-    logistic: {
-        type: String
-    },
-    behavior: {
-        type: String
     },
 
     notes: String
