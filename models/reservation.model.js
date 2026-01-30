@@ -40,6 +40,12 @@ const reservationSchema = new mongoose.Schema({
         enum: ["Online", "Walk-in", "Phone", "Email", "Remi"],
         default: "Phone"
     },
+    tags: [
+        {
+            type: String,
+            trim: true
+        }
+    ],
     seating: {
         type: String,
         enum: ["Any", "Outdoor", "Indoor", "Non Smoking", "Window"],

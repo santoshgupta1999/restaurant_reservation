@@ -9,14 +9,14 @@ const userRouter = require('./routes/userRoutes');
 const adminRouter = require('./routes/adminRoutes');
 const restRouter = require('./routes/restaurantRoutes');
 const reservRouter = require('./routes/reservationRoutes');
-
+require("./jobs/blockExpiry.job");
 const app = express();
 app.use(express.json());
 app.use(cors());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get('/', (req, res) => {
-    res.send('Restaurants Reservation APP is Running!');
+  res.send('Restaurants Reservation APP is Running!');
 });
 
 app.use('/api/auth/', userRouter);
@@ -26,7 +26,7 @@ app.use('/api/reservation', reservRouter);
 
 app.use((err, req, res, next) => {
   logger.error('Unhandled error:', err);
-  res.status(400).json({ success: false, message: err.message});
+  res.status(400).json({ success: false, message: err.message });
 });
 
 process.on('unhandledRejection', (reason) => {

@@ -15,7 +15,7 @@ const blockSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ["Draft", "Active", "Ended"],
+            enum: ["Draft", "Active", "Ended", "Expired"],
             default: "Active"
         },
 
@@ -66,7 +66,16 @@ const blockSchema = new mongoose.Schema(
         isActive: {
             type: Boolean,
             default: true
-        }
+        },
+
+        priority: {
+            type: Number
+        },
+
+        isExpired: {
+            type: Boolean
+        },
+
     },
     { timestamps: true }
 );

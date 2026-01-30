@@ -11,6 +11,14 @@ const guestSchema = new mongoose.Schema(
         lastName: { type: String },
         gender: { type: String, enum: ["Male", "Female", "Other", "Prefer not to say"], default: "Prefer not to say" },
         dob: { type: Date },
+        anniversary: { type: Date },
+        secondaryEmail: { type: String },
+        secondaryPhone: { type: String },
+        address: { type: String },
+        marketingOptIn: {
+            type: Boolean,
+            default: false
+        },
         email: { type: String },
         phone: { type: String },
         notes: { type: String },
@@ -22,6 +30,8 @@ const guestSchema = new mongoose.Schema(
         ],
         jobTitle: { type: String },
         company: { type: String },
+
+        preffered: { type: String },
 
         totalVisits: { type: Number, default: 0 },
         lastVisitAt: { type: Date },

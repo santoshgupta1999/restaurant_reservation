@@ -3,6 +3,7 @@ const Shift = require('../models/shift.model');
 const Table = require('../models/table.model');
 const User = require('../models/user.model');
 const Guest = require('../models/guest.model');
+const Block = require('../models/block.model');
 const Restaurant = require('../models/restaurant.model');
 const mongoose = require('mongoose');
 // const sendSMS = require('../utils/sendSMS'); // <-- optional SMS helper
@@ -25,6 +26,7 @@ exports.createReservation = async (req, res) => {
             lastName,
             guestEmail,
             guestPhone,
+            gender,
             dob,
 
             // Reservation fields
@@ -115,6 +117,35 @@ exports.createReservation = async (req, res) => {
         }
 
         /* ---------------------------------------------------
+   🔹 BLOCK AVAILABILITY CHECK (NEW)
+--------------------------------------------------- */
+
+        const conflictingBlock = await Block.findOne({
+            restaurantId,
+            status: "Active",
+            isExpired: false,
+            startDate: { $lte: reservationDate },
+            endDate: { $gte: reservationDate },
+            $or: [
+                { isFullRestaurantBlock: true },
+                tableId ? { tableIds: tableId } : {},
+                shift ? { shiftIds: shift._id } : {}
+            ]
+        });
+
+        if (conflictingBlock) {
+            return res.status(400).json({
+                success: false,
+                message: `This table is not available from ${conflictingBlock.startDate.toDateString()} to ${conflictingBlock.endDate.toDateString()}. Please choose another table.`,
+                block: {
+                    reason: conflictingBlock.reason,
+                    startDate: conflictingBlock.startDate,
+                    endDate: conflictingBlock.endDate
+                }
+            });
+        }
+
+        /* ---------------------------------------------------
            🔹 TABLE AVAILABILITY CHECK
         --------------------------------------------------- */
 
@@ -158,6 +189,7 @@ exports.createReservation = async (req, res) => {
             guest.lastName = lastName || guest.lastName;
             guest.phone = guestPhone || guest.phone;
             guest.email = guestEmail || guest.email;
+            guest.gender = gender || guest.gender;
             guest.dob = dob || guest.dob;
 
             if (tags?.length) {
@@ -173,6 +205,7 @@ exports.createReservation = async (req, res) => {
                 lastName,
                 phone: guestPhone,
                 email: guestEmail,
+                gender,
                 dob,
                 tags,
                 notes
@@ -266,7 +299,7 @@ exports.getReservations = async (req, res) => {
             query.source = source;
         }
 
-        const reservations = await Reservation.find(query)
+        const reservationsRaw = await Reservation.find(query)
             .populate({
                 path: "guestId",
                 select: `
@@ -293,6 +326,30 @@ exports.getReservations = async (req, res) => {
                 select: "name startTime endTime type"
             })
             .sort({ date: 1, time: 1 });
+
+        /* ===============================
+           DATE TRIM HELPER
+        =============================== */
+        const trimDate = (val) =>
+            val ? new Date(val).toISOString().split("T")[0] : null;
+
+        const reservations = reservationsRaw.map(r => {
+            const obj = r.toObject();
+
+            /* Reservation dates */
+            obj.date = trimDate(obj.date);
+            obj.createdAt = trimDate(obj.createdAt);
+            obj.updatedAt = trimDate(obj.updatedAt);
+
+            /* Guest dates */
+            if (obj.guestId) {
+                obj.guestId.dob = trimDate(obj.guestId.dob);
+                obj.guestId.lastVisitAt = trimDate(obj.guestId.lastVisitAt);
+                obj.guestId.upcomingVisitAt = trimDate(obj.guestId.upcomingVisitAt);
+            }
+
+            return obj;
+        });
 
         return res.status(200).json({
             success: true,
@@ -581,73 +638,39 @@ exports.deleteReservationById = async (req, res) => {
     }
 };
 
-exports.getDashboardOverview = async (req, res) => {
+exports.dashboardSummary = async (req, res) => {
     try {
-        const user = req.user;
-
-        let matchQuery = {};
-        let totalRestaurants = 0;
-
-        /* ================= ADMIN ================= */
-        if (user.role === "admin") {
-            totalRestaurants = await Restaurant.countDocuments({});
-        }
-        /* ================= RESTAURANT USER ================= */
-        else {
-            if (!user.restaurantId) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Restaurant not linked with this user"
-                });
-            }
-
-            matchQuery.restaurantId = new mongoose.Types.ObjectId(user.restaurantId);
-            totalRestaurants = 1;
-        }
-
-        const [
-            totalReservations,
-            totalConfirmed,
-            totalPending,
-            totalGuestsServed
-        ] = await Promise.all([
-
-            /* -------- Reservations -------- */
-            Reservation.countDocuments(matchQuery),
-
-            Reservation.countDocuments({
-                ...matchQuery,
-                status: "Confirmed"
-            }),
-
-            Reservation.countDocuments({
-                ...matchQuery,
-                status: "Pending"
-            }),
-
-            /* -------- Guests (TOTAL COUNT) -------- */
-            Guest.countDocuments(matchQuery)
+        const [stats, newVenues] = await Promise.all([
+            Restaurant.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: 1 },
+                        active: {
+                            $sum: { $cond: [{ $eq: ["$status", "active"] }, 1, 0] }
+                        },
+                        inactive: {
+                            $sum: { $cond: [{ $eq: ["$status", "inactive"] }, 1, 0] }
+                        }
+                    }
+                }
+            ]),
+            Restaurant.countDocuments({
+                createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+            })
         ]);
 
-        return res.status(200).json({
+        return res.json({
             success: true,
-            message: "Dashboard data fetched successfully",
             data: {
-                totalReservations,
-                totalRestaurants,
-                totalConfirmed,
-                totalPending,
-                totalGuestsServed
+                totalVenues: stats[0]?.total || 0,
+                activeVenues: stats[0]?.active || 0,
+                inactiveVenues: stats[0]?.inactive || 0,
+                newVenuesLast30Days: newVenues
             }
         });
-
-    } catch (error) {
-        console.error("Dashboard API error:", error);
-        res.status(500).json({
-            success: false,
-            message: "Error fetching dashboard data",
-            error: error.message
-        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 };
 
@@ -851,3 +874,580 @@ exports.getReservationList = async (req, res) => {
         });
     }
 };
+
+exports.bookingStats = async (req, res) => {
+    try {
+        const now = new Date();
+
+        const startOfToday = new Date(now.setHours(0, 0, 0, 0));
+        const startOfWeek = new Date();
+        startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+        startOfWeek.setHours(0, 0, 0, 0);
+
+        const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        const startOfYear = new Date(new Date().getFullYear(), 0, 1);
+
+        const [today, wtd, mtd, ytd] = await Promise.all([
+            Reservation.countDocuments({ createdAt: { $gte: startOfToday } }),
+            Reservation.countDocuments({ createdAt: { $gte: startOfWeek } }),
+            Reservation.countDocuments({ createdAt: { $gte: startOfMonth } }),
+            Reservation.countDocuments({ createdAt: { $gte: startOfYear } })
+        ]);
+
+        res.json({
+            success: true,
+            data: {
+                today,
+                weekToDate: wtd,
+                monthToDate: mtd,
+                yearToDate: ytd
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+exports.bookingTrend24h = async (req, res) => {
+    try {
+        const start = new Date();
+        start.setHours(start.getHours() - 24);
+
+        const trend = await Reservation.aggregate([
+            { $match: { createdAt: { $gte: start } } },
+            {
+                $group: {
+                    _id: { hour: { $hour: "$createdAt" } },
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { "_id.hour": 1 } }
+        ]);
+
+        res.json({
+            success: true,
+            data: trend.map(t => ({
+                hour: `${t._id.hour}:00`,
+                count: t.count
+            }))
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+exports.mostActiveVenues = async (req, res) => {
+    try {
+        const data = await Reservation.aggregate([
+            {
+                $group: {
+                    _id: "$restaurantId",
+                    totalBookings: { $sum: 1 }
+                }
+            },
+            { $sort: { totalBookings: -1 } },
+            { $limit: 5 },
+            {
+                $lookup: {
+                    from: "restaurants",
+                    localField: "_id",
+                    foreignField: "_id",
+                    as: "restaurant"
+                }
+            },
+            { $unwind: "$restaurant" }
+        ]);
+
+        res.json({
+            success: true,
+            data: data.map(d => ({
+                restaurantName: d.restaurant.name,
+                totalBookings: d.totalBookings
+            }))
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+exports.getRemiUsers = async (req, res) => {
+    try {
+        const { range = "12m" } = req.query;
+
+        /* ================= DATE RANGE ================= */
+        const now = new Date();
+        let startDate = new Date();
+
+        switch (range) {
+            case "24h": startDate.setHours(now.getHours() - 24); break;
+            case "7d": startDate.setDate(now.getDate() - 7); break;
+            case "30d": startDate.setDate(now.getDate() - 30); break;
+            case "3m": startDate.setMonth(now.getMonth() - 3); break;
+            default: startDate.setMonth(now.getMonth() - 12);
+        }
+
+        const REMI_REGEX = /(Remi user|Remi influencer)/i;
+
+        /* ================= TOTAL REMI USERS ================= */
+        const totalRemiUsersPromise = Guest.countDocuments({
+            tags: { $elemMatch: { $regex: REMI_REGEX } }
+        });
+
+        /* ================= NEW REMI USERS ================= */
+        const newRemiUsersPromise = Guest.countDocuments({
+            tags: { $elemMatch: { $regex: REMI_REGEX } },
+            createdAt: { $gte: startDate }
+        });
+
+        /* ================= MOST ACTIVE VENUES ================= */
+        const mostActiveVenuesPromise = Reservation.aggregate([
+            {
+                $match: {
+                    createdAt: { $gte: startDate }
+                }
+            },
+            {
+                $lookup: {
+                    from: "guests",
+                    localField: "guestId",
+                    foreignField: "_id",
+                    as: "guest"
+                }
+            },
+            { $unwind: "$guest" },
+            {
+                $match: {
+                    "guest.tags": { $elemMatch: { $regex: REMI_REGEX } }
+                }
+            },
+            {
+                $group: {
+                    _id: {
+                        restaurantId: "$restaurantId",
+                        guestId: "$guestId"
+                    }
+                }
+            },
+            {
+                $group: {
+                    _id: "$_id.restaurantId",
+                    remiUsers: { $sum: 1 }
+                }
+            },
+            {
+                $lookup: {
+                    from: "restaurants",
+                    localField: "_id",
+                    foreignField: "_id",
+                    as: "restaurant"
+                }
+            },
+            { $unwind: "$restaurant" },
+            {
+                $project: {
+                    restaurantId: "$_id",
+                    restaurantName: "$restaurant.name",
+                    remiUsers: 1,
+                    _id: 0
+                }
+            },
+            { $sort: { remiUsers: -1 } },
+            { $limit: 5 }
+        ]);
+
+        /* ================= TREND ================= */
+        const trendPromise = Guest.aggregate([
+            {
+                $match: {
+                    tags: { $elemMatch: { $regex: REMI_REGEX } },
+                    createdAt: { $gte: startDate }
+                }
+            },
+            {
+                $group: {
+                    _id: {
+                        month: { $month: "$createdAt" },
+                        year: { $year: "$createdAt" }
+                    },
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { "_id.year": 1, "_id.month": 1 } }
+        ]);
+
+        const [
+            totalRemiUsers,
+            newRemiUsers,
+            mostActiveVenues,
+            trendRaw
+        ] = await Promise.all([
+            totalRemiUsersPromise,
+            newRemiUsersPromise,
+            mostActiveVenuesPromise,
+            trendPromise
+        ]);
+
+        return res.json({
+            success: true,
+            data: {
+                summary: {
+                    totalRemiUsers,
+                    newRemiUsers,
+                    growthPercent: totalRemiUsers
+                        ? Math.round((newRemiUsers / totalRemiUsers) * 100)
+                        : 0
+                },
+                mostActiveVenues,
+                trend: trendRaw.map(t => ({
+                    label: `${t._id.month}/${t._id.year}`,
+                    count: t.count
+                }))
+            }
+        });
+
+    } catch (error) {
+        console.error("Remi Dashboard Error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to load Remi dashboard",
+            error: error.message
+        });
+    }
+};
+
+exports.getNoShowRiskVenues = async (req, res) => {
+    try {
+        const { range = "12m" } = req.query;
+
+        /* ================= DATE RANGE ================= */
+        const now = new Date();
+        let startDate = new Date();
+
+        switch (range) {
+            case "24h": startDate.setHours(now.getHours() - 24); break;
+            case "7d": startDate.setDate(now.getDate() - 7); break;
+            case "30d": startDate.setDate(now.getDate() - 30); break;
+            case "3m": startDate.setMonth(now.getMonth() - 3); break;
+            default: startDate.setMonth(now.getMonth() - 12);
+        }
+
+        /* ================= AGGREGATION ================= */
+        const data = await Reservation.aggregate([
+            {
+                $match: {
+                    createdAt: { $gte: startDate }
+                }
+            },
+            {
+                $group: {
+                    _id: "$restaurantId",
+                    totalReservations: { $sum: 1 },
+                    noShows: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "No-show"] }, 1, 0]
+                        }
+                    }
+                }
+            },
+            {
+                $project: {
+                    totalReservations: 1,
+                    noShows: 1,
+                    noShowRate: {
+                        $multiply: [
+                            { $divide: ["$noShows", "$totalReservations"] },
+                            100
+                        ]
+                    }
+                }
+            },
+            {
+                $match: {
+                    noShowRate: { $gt: 15 }
+                }
+            },
+            {
+                $lookup: {
+                    from: "restaurants",
+                    localField: "_id",
+                    foreignField: "_id",
+                    as: "restaurant"
+                }
+            },
+            { $unwind: "$restaurant" },
+            {
+                $project: {
+                    restaurantId: "$_id",
+                    restaurantName: "$restaurant.name",
+                    noShowRate: { $round: ["$noShowRate", 1] },
+                    _id: 0
+                }
+            },
+            { $sort: { noShowRate: -1 } },
+            { $limit: 4 }
+        ]);
+
+        return res.json({
+            success: true,
+            count: data.length,
+            data
+        });
+
+    } catch (error) {
+        console.error("No-show Risk Error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch no-show risk data",
+            error: error.message
+        });
+    }
+};
+
+// exports.createReservation = async (req, res) => {
+//     try {
+//         const {
+//             reservationId, // 🔥 NEW (optional)
+
+//             restaurantId,
+//             tableId,
+
+//             // Guest fields
+//             firstName,
+//             lastName,
+//             guestEmail,
+//             guestPhone,
+//             gender,
+//             dob,
+
+//             // Reservation fields
+//             date,
+//             time,
+//             partySize,
+//             source,
+//             status,
+//             seating,
+//             tags,
+//             notes
+//         } = req.body;
+
+//         if (!restaurantId || !date || !time) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "restaurantId, date & time are required."
+//             });
+//         }
+
+//         const reservationDate = new Date(date);
+//         const weekdayName = reservationDate.toLocaleDateString("en-US", {
+//             weekday: "long"
+//         });
+
+//         /* ---------------------------------------------------
+//            🔹 SHIFT LOGIC (UNCHANGED)
+//         --------------------------------------------------- */
+
+//         const allShifts = await Shift.find({
+//             restaurantId,
+//             isActive: true,
+//             $or: [
+//                 { type: "Recurring", daysActive: { $in: [weekdayName] } },
+//                 {
+//                     type: "Special",
+//                     startDate: { $lte: reservationDate },
+//                     endDate: { $gte: reservationDate }
+//                 }
+//             ]
+//         });
+
+//         if (!allShifts.length) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "No shifts available for this day."
+//             });
+//         }
+
+//         const [hh, mm] = time.split(":").map(Number);
+//         const reservationMinutes = hh * 60 + mm;
+
+//         const toMinutes = t => {
+//             const [h, m] = t.split(":").map(Number);
+//             return h * 60 + m;
+//         };
+
+//         let shift = allShifts.find(s => {
+//             const start = toMinutes(s.startTime);
+//             const end = toMinutes(s.endTime);
+//             return reservationMinutes >= start && reservationMinutes < end;
+//         });
+
+//         if (!shift) {
+//             let nearest = null;
+//             let minDiff = Infinity;
+
+//             allShifts.forEach(s => {
+//                 const diff = Math.abs(reservationMinutes - toMinutes(s.startTime));
+//                 if (diff < minDiff) {
+//                     minDiff = diff;
+//                     nearest = s;
+//                 }
+//             });
+
+//             if (minDiff > 60) {
+//                 return res.status(400).json({
+//                     success: false,
+//                     message: "Reservation time is outside all shift timings."
+//                 });
+//             }
+
+//             shift = nearest;
+//         }
+
+//         /* ---------------------------------------------------
+//            🔹 TABLE AVAILABILITY (EXCLUDE SELF IF UPDATE)
+//         --------------------------------------------------- */
+
+//         if (tableId) {
+//             const conflictQuery = {
+//                 restaurantId,
+//                 tableId,
+//                 date: reservationDate,
+//                 time,
+//                 status: { $nin: ["Cancelled", "No-show"] }
+//             };
+
+//             if (reservationId) {
+//                 conflictQuery._id = { $ne: reservationId };
+//             }
+
+//             const existing = await Reservation.findOne(conflictQuery);
+
+//             if (existing) {
+//                 return res.status(400).json({
+//                     success: false,
+//                     message: "This table is already reserved for the selected date & time."
+//                 });
+//             }
+//         }
+
+//         /* ---------------------------------------------------
+//            🔹 CREATE / UPDATE GUEST (UNCHANGED)
+//         --------------------------------------------------- */
+
+//         let guest = null;
+
+//         if (guestPhone) {
+//             guest = await Guest.findOne({ restaurantId, phone: guestPhone });
+//         }
+
+//         if (!guest && guestEmail) {
+//             guest = await Guest.findOne({
+//                 restaurantId,
+//                 email: guestEmail.toLowerCase()
+//             });
+//         }
+
+//         if (guest) {
+//             guest.firstName = firstName || guest.firstName;
+//             guest.lastName = lastName || guest.lastName;
+//             guest.phone = guestPhone || guest.phone;
+//             guest.email = guestEmail || guest.email;
+//             guest.gender = gender || guest.gender;
+//             guest.dob = dob || guest.dob;
+
+//             if (tags?.length) {
+//                 guest.tags = [...new Set([...guest.tags, ...tags])];
+//             }
+
+//             await guest.save();
+//         } else {
+//             guest = await Guest.create({
+//                 restaurantId,
+//                 firstName,
+//                 lastName,
+//                 phone: guestPhone,
+//                 email: guestEmail,
+//                 gender,
+//                 dob,
+//                 tags,
+//                 notes
+//             });
+//         }
+
+//         /* ---------------------------------------------------
+//            🔹 CREATE OR UPDATE RESERVATION
+//         --------------------------------------------------- */
+
+//         let reservation;
+
+//         if (reservationId) {
+//             reservation = await Reservation.findByIdAndUpdate(
+//                 reservationId,
+//                 {
+//                     restaurantId,
+//                     guestId: guest._id,
+//                     tableId,
+//                     shiftId: shift._id,
+//                     date: reservationDate,
+//                     time,
+//                     partySize,
+//                     source,
+//                     status,
+//                     seating,
+//                     tags,
+//                     notes
+//                 },
+//                 { new: true }
+//             );
+
+//             if (!reservation) {
+//                 return res.status(404).json({
+//                     success: false,
+//                     message: "Reservation not found."
+//                 });
+//             }
+//         } else {
+//             reservation = await Reservation.create({
+//                 restaurantId,
+//                 guestId: guest._id,
+//                 tableId,
+//                 shiftId: shift._id,
+//                 date: reservationDate,
+//                 time,
+//                 partySize,
+//                 source,
+//                 status,
+//                 seating,
+//                 tags,
+//                 notes
+//             });
+//         }
+
+//         /* ---------------------------------------------------
+//            🔹 UPDATE UPCOMING VISIT
+//         --------------------------------------------------- */
+
+//         await Guest.findByIdAndUpdate(guest._id, {
+//             upcomingVisitAt: reservationDate
+//         });
+
+//         return res.status(201).json({
+//             success: true,
+//             message: reservationId
+//                 ? "Reservation updated successfully."
+//                 : "Reservation created successfully.",
+//             assignedShift: shift.name,
+//             data: {
+//                 reservation,
+//                 guest
+//             }
+//         });
+
+//     } catch (error) {
+//         console.error("Reservation error:", error);
+//         return res.status(500).json({
+//             success: false,
+//             message: "Error processing reservation.",
+//             error: error.message
+//         });
+//     }
+// };

@@ -7,8 +7,9 @@ exports.blockValidator = [
 
     body("reason")
         .notEmpty().withMessage("reason is required")
-        .isIn(["Maintenance", "Closed", "Day Off"])
-        .withMessage("Invalid reason"),
+        .withMessage("Invalid reason")
+        .isLength({ min: 3, max: 60 })
+        .withMessage("roomName must be between 3 and 60 characters"),
 
     body("status")
         .optional()
@@ -30,11 +31,11 @@ exports.blockValidator = [
         .optional()
         .isBoolean().withMessage("isFullRestaurantBlock must be boolean"),
 
-    body("roomName")
-        .optional()
-        .isString()
-        .isLength({ min: 3, max: 60 })
-        .withMessage("roomName must be between 3 and 60 characters"),
+    // body("roomName")
+    //     .optional()
+    //     .isString()
+    //     .isLength({ min: 3, max: 60 })
+    //     .withMessage("roomName must be between 3 and 60 characters"),
 
     body("tableIds")
         .optional()

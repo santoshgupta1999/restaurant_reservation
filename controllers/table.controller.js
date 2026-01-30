@@ -2,6 +2,7 @@ const Table = require('../models/table.model');
 const Reservation = require('../models/reservation.model');
 const Block = require('../models/block.model');
 const Shift = require('../models/shift.model');
+const mongoose = require('mongoose');
 
 exports.createTable = async (req, res) => {
     try {
@@ -48,16 +49,49 @@ exports.getAllTables = async (req, res) => {
             });
         }
 
-        const tables = await Table.find({ restaurantId, isActive: true })
+        if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid restaurantId.",
+            });
+        }
+
+        const tablesRaw = await Table.find({
+            restaurantId,
+            isActive: true
+        })
             .populate("joinedWith", "tableNumber")
             .sort({ roomName: 1, tableNumber: 1 });
 
-        if (!tables.length) {
+        if (!tablesRaw.length) {
             return res.status(404).json({
                 success: false,
-                message: "No tables found for this restaurant.",
+                message: "No active tables found for this restaurant.",
             });
         }
+
+        /* ===============================
+           DATE TRIM FUNCTION
+        =============================== */
+        const formatTableDates = (table) => {
+            const obj = table.toObject();
+
+            if (obj.createdAt) {
+                obj.createdAt = new Date(obj.createdAt)
+                    .toISOString()
+                    .split("T")[0];
+            }
+
+            if (obj.updatedAt) {
+                obj.updatedAt = new Date(obj.updatedAt)
+                    .toISOString()
+                    .split("T")[0];
+            }
+
+            return obj;
+        };
+
+        const tables = tablesRaw.map(formatTableDates);
 
         const groupedTables = tables.reduce((acc, table) => {
             if (!acc[table.roomName]) acc[table.roomName] = [];
@@ -67,7 +101,7 @@ exports.getAllTables = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: "Tables fetched successfully.",
+            message: "Active tables fetched successfully.",
             totalRooms: Object.keys(groupedTables).length,
             totalTables: tables.length,
             data: groupedTables,
@@ -75,7 +109,7 @@ exports.getAllTables = async (req, res) => {
 
     } catch (error) {
         console.error("Error fetching tables:", error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Error fetching tables.",
             error: error.message,

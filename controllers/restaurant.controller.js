@@ -363,7 +363,7 @@ exports.updateRestaurantStatus = async (req, res) => {
 exports.createShift = async (req, res) => {
     try {
 
-        // Handle validation errors from route
+        /* ================= VALIDATION ================= */
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             return res.status(400).json({
@@ -373,20 +373,49 @@ exports.createShift = async (req, res) => {
         }
 
         let payload = { ...req.body };
+        const shiftId = payload.id || payload._id;
 
-        // Handle duration logic
+        delete payload.id;
+        delete payload._id;
+
+        /* ================= DURATION LOGIC ================= */
         if (payload.sameDurationForAll) {
             delete payload.durationByPartySize;
         } else {
             delete payload.duration;
         }
 
-        // Handle payment logic
+        /* ================= PAYMENT LOGIC ================= */
         if (!payload.includePayment) {
             payload.payment = undefined;
         }
 
-        const shift = await Shift.create(payload);
+        let shift;
+
+        /* ================= UPDATE ================= */
+        if (shiftId) {
+            shift = await Shift.findByIdAndUpdate(
+                shiftId,
+                payload,
+                { new: true }
+            );
+
+            if (!shift) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Shift not found"
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "Shift updated successfully",
+                data: shift
+            });
+        }
+
+        /* ================= CREATE ================= */
+        shift = await Shift.create(payload);
 
         return res.status(201).json({
             success: true,
@@ -395,10 +424,10 @@ exports.createShift = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error creating shift:", error);
+        console.error("Error creating/updating shift:", error);
         res.status(500).json({
             success: false,
-            message: "Error during creating shift",
+            message: "Error during creating/updating shift",
             error: error.message
         });
     }
@@ -407,7 +436,10 @@ exports.createShift = async (req, res) => {
 exports.getAllShift = async (req, res) => {
     try {
         const { restaurantId, type } = req.query;
-        const query = {};
+
+        const query = {
+            isActive: true
+        };
 
         if (restaurantId) {
             if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
@@ -419,15 +451,52 @@ exports.getAllShift = async (req, res) => {
             query.restaurantId = restaurantId;
         }
 
-        if (type) query.type = type;
+        if (type) {
+            query.type = type;
+        }
 
-        const shifts = await Shift.find(query)
+        const shiftsRaw = await Shift.find(query)
             .populate("restaurantId", "name email phone address")
             .sort({ createdAt: -1 });
 
+        /* ===============================
+           DATE TRIM FUNCTION
+        =============================== */
+        const formatShiftDates = (shift) => {
+            const obj = shift.toObject();
+
+            if (obj.startDate) {
+                obj.startDate = new Date(obj.startDate)
+                    .toISOString()
+                    .split("T")[0];
+            }
+
+            if (obj.endDate) {
+                obj.endDate = new Date(obj.endDate)
+                    .toISOString()
+                    .split("T")[0];
+            }
+
+            if (obj.createdAt) {
+                obj.createdAt = new Date(obj.createdAt)
+                    .toISOString()
+                    .split("T")[0];
+            }
+
+            if (obj.updatedAt) {
+                obj.updatedAt = new Date(obj.updatedAt)
+                    .toISOString()
+                    .split("T")[0];
+            }
+
+            return obj;
+        };
+
+        const shifts = shiftsRaw.map(formatShiftDates);
+
         return res.status(200).json({
             success: true,
-            message: "Shifts fetched successfully.",
+            message: "Active shifts fetched successfully.",
             count: shifts.length,
             data: shifts,
         });
