@@ -1,19 +1,42 @@
-const Restaurant = require('../models/restaurant.model');
+const Restaurant = require("../models/Restaurant.model")
 const Shift = require('../models/shift.model');
 const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
 const baseUrl = process.env.BASE_URL;
 const { validationResult } = require("express-validator");
+const User = require("../models/user.model");
+const bcrypt = require("bcryptjs");
+
 
 
 exports.createRestaurant = async (req, res) => {
     try {
-        const {
-            name, email, phone, address, openingHours
+        let {
+            venueName,
+            country,
+            city,
+            managerEmail,
+            tier,
+            status,
+            trialEndDate,
+
+            cuisines,
+            pricePoint,
+            vibeTags,
+            shortDescription,
+            longDescription,
+            website,
+            googleMapsLink,
+            menuLink,
+            openingHours,
+            instagram,
+            facebook,
+            tiktok,
+            x
         } = req.body;
 
-        const existingRestaurant = await Restaurant.findOne({ email });
+        const existingRestaurant = await Restaurant.findOne({ managerEmail });
         if (existingRestaurant) {
             return res.status(400).json({
                 success: false,
@@ -21,38 +44,92 @@ exports.createRestaurant = async (req, res) => {
             });
         }
 
-        const logo = req.files['logo']
-            ? `${req.files['logo'][0].filename}`
-            : null;
+        // 🟢 STATUS FIX (schema enum capital me hai)
+        status = status ? status.trim() : "Trial";
 
-        const createdBy = req.user?._id;
+        // REQUIRED
+        if (!venueName || !country || !city || !managerEmail || !tier) {
+            return res.status(400).json({
+                message: "Required fields missing"
+            });
+        }
 
-        const newRestaurant = new Restaurant({
-            name,
-            email,
-            phone,
-            address,
+        if (status === "Trial" && !trialEndDate) {
+            return res.status(400).json({
+                message: "Trial end date required"
+            });
+        }
+
+        // IMAGE
+        let heroImage = null;
+        if (req.file) heroImage = req.file.filename;
+
+        // CREATE VENUE (SCHEMA FIELD NAMES MATCH)
+        const venue = new Restaurant({
+            venueName: venueName,
+            country,
+            city,
+            managerEmail,
+            tier,
+            status,
+            trialEndDate,
+            cuisines,
+            pricePoint,
+            vibeTags,
+            shortDescription,
+            longDescription,
+            website,
+            googleMapsLink,
+            menuLink,
             openingHours,
-            logo,
-            createdBy
+
+            socialHandles: {
+                instagram,
+                facebook,
+                tiktok,
+                x
+            },
+
+            heroImage,
+            createdBy: req.user?._id
         });
 
-        await newRestaurant.save();
-        return res.status(201).json({
+        await venue.save();
+
+        // CREATE MANAGER USER
+        let manager = await User.findOne({ email: managerEmail });
+
+        if (!manager) {
+            const tempPassword = "Temp@123";
+            const hashed = await bcrypt.hash(tempPassword, 10);
+
+
+            manager = await User.create({
+                name: "abc",
+                email: managerEmail,
+                password: hashed,
+                role: "manager",
+                restaurantId: venue._id
+            });
+        }
+
+        venue.managerUserId = manager._id;
+        await venue.save();
+
+        res.status(201).json({
             success: true,
-            message: 'Restaurant created successfully',
-            data: newRestaurant
+            message: "Venue + Manager created",
+            venue
         });
 
     } catch (err) {
-        console.error('Error creating restaurant:', err);
+        console.log(err);
         res.status(500).json({
-            success: false,
-            message: 'Error creating restaurant',
-            error: err.message
+            message: err.message
         });
     }
 };
+
 
 exports.getRestaurants = async (req, res) => {
     try {
@@ -437,9 +514,7 @@ exports.getAllShift = async (req, res) => {
     try {
         const { restaurantId, type } = req.query;
 
-        const query = {
-            isActive: true
-        };
+        const query = {};
 
         if (restaurantId) {
             if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
@@ -791,3 +866,96 @@ exports.updateShiftStatus = async (req, res) => {
         });
     }
 };
+
+exports.getVenueList = async (req, res) => {
+    try {
+
+        const venues = await Restaurant.aggregate([
+            {
+                $lookup: {
+                    from: "reservations",
+                    localField: "_id",
+                    foreignField: "restaurantId",
+                    as: "reservations"
+                }
+            },
+
+            {
+                $addFields: {
+                    lastBookingRaw: { $max: "$reservations.createdAt" }
+                }
+            },
+
+            // 📅 format last booking
+            {
+                $addFields: {
+                    lastBooking: {
+                        $cond: [
+                            { $ifNull: ["$lastBookingRaw", false] },
+                            {
+                                $dateToString: {
+                                    format: "%B %d, %Y",
+                                    date: "$lastBookingRaw",
+                                    timezone: "Asia/Kolkata"
+                                }
+                            },
+                            "-"
+                        ]
+                    }
+                }
+            },
+
+            // ⏳ trial days left
+            {
+                $addFields: {
+                    trialDaysLeft: {
+                        $cond: [
+                            { $ifNull: ["$trialEndDate", false] },
+                            {
+                                $max: [
+                                    {
+                                        $dateDiff: {
+                                            startDate: "$$NOW",
+                                            endDate: "$trialEndDate",
+                                            unit: "day"
+                                        }
+                                    },
+                                    0
+                                ]
+                            },
+                            null
+                        ]
+                    }
+                }
+            },
+
+            {
+                $project: {
+                    venueName: 1,
+                    remiId: 1,
+                    city: 1,
+                    tier: 1,
+                    status: 1,
+                    managerEmail: 1,
+                    lastBooking: 1,
+                    trialDaysLeft: 1
+                }
+            },
+
+            { $sort: { createdAt: -1 } }
+        ]);
+
+        res.json({
+            success: true,
+            count: venues.length,
+            data: venues
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
+    }
+};
+

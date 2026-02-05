@@ -8,11 +8,15 @@ const { createGuestValidator, updateGuestValidator, searchGuestValidator } = req
 const { validate } = require('../middlewares/validationResultHandler');
 const { verifyToken, requireRole } = require('../middlewares/auth.middleware');
 const upload = require('../middlewares/upload.middleware');
+const seatingPreference = require("../controllers/seatingPreference");
+const restaurantController = require("../controllers/restaurant.controller")
+
+
 
 router.post('/restaurants',
     upload.fields([
-        { name: 'logo', maxCount: 1 },
-    ]), restaurantValidator, verifyToken, restController.createRestaurant);
+        { name: 'heroImage', maxCount: 1 },
+    ]), restController.createRestaurant);
 
 router.get('/restaurants', restController.getRestaurants);
 router.get('/restaurants/:id', restController.getRestaurantById);
@@ -37,5 +41,11 @@ router.post('/deleteGuest/:id', guestController.deleteGuest);
 router.post('/updateGuestStatus', guestController.updateGuestStatus);
 router.post('/getRemiUsersList', guestController.getRemiUsersList);
 router.post('/editGuest', guestController.editGuest);
+router.post('/getRemiUsersList/reservations', guestController.getCrossVenue);
+router.post('/getRemiUsersList/getGlobalVisit', guestController.getGlobalVisit);
+
+// restaurant
+
+router.post('/getVenueList', restaurantController.getVenueList);
 
 module.exports = router;

@@ -10,10 +10,13 @@ const adminRouter = require('./routes/adminRoutes');
 const restRouter = require('./routes/restaurantRoutes');
 const reservRouter = require('./routes/reservationRoutes');
 require("./jobs/blockExpiry.job");
+
 const app = express();
 app.use(express.json());
 app.use(cors());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+
 
 app.get('/', (req, res) => {
   res.send('Restaurants Reservation APP is Running!');
@@ -32,6 +35,7 @@ app.use((err, req, res, next) => {
 process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled Rejection:', reason);
 });
+
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught Exception:', { message: err.message, stack: err.stack });
   process.exit(1);

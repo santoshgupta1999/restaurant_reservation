@@ -2,6 +2,7 @@ const { default: mongoose } = require("mongoose");
 const Guest = require("../models/guest.model");
 const Reservation = require('../models/reservation.model');
 const Table = require('../models/table.model');
+const Restaurant = require('../models/Restaurant.model');
 
 const formatTimeRange = (time) => {
     if (!time) return null;
@@ -546,57 +547,179 @@ exports.updateGuestStatus = async (req, res) => {
     }
 };
 
+// exports.getRemiUsersList = async (req, res) => {
+//     try {
+//         const {
+//             search = "",
+//             page = 1,
+//             limit = 30,
+//             dateFrom,
+//             dateTo,
+//             minVisits,
+//             maxNoShows
+//         } = req.body;
+
+//         const skip = (page - 1) * limit;
+//         const REMI_REGEX = /(Remi user|Remi influencer)/i;
+
+//         const matchGuest = {
+//             tags: { $elemMatch: { $regex: REMI_REGEX } }
+//         };
+
+//         if (search) {
+//             matchGuest.$or = [
+//                 { firstName: { $regex: search, $options: "i" } },
+//                 { lastName: { $regex: search, $options: "i" } },
+//                 { email: { $regex: search, $options: "i" } },
+//                 { phone: { $regex: search, $options: "i" } }
+//             ];
+//         }
+
+//         const reservationMatch = {};
+//         if (dateFrom && dateTo) {
+//             reservationMatch.date = {
+//                 $gte: new Date(dateFrom),
+//                 $lte: new Date(dateTo)
+//             };
+//         }
+
+//         const pipeline = [
+//             { $match: matchGuest },
+
+//             {
+//                 $lookup: {
+//                     from: "reservations",
+//                     localField: "_id",
+//                     foreignField: "guestId",
+//                     pipeline: [
+//                         { $match: reservationMatch }
+//                     ],
+//                     as: "reservations"
+//                 }
+//             },
+
+//             {
+//                 $addFields: {
+//                     visits: { $size: "$reservations" },
+//                     venues: {
+//                         $size: {
+//                             $setUnion: ["$reservations.restaurantId", []]
+//                         }
+//                     },
+//                     lastVisit: { $max: "$reservations.date" },
+//                     noShows: {
+//                         $size: {
+//                             $filter: {
+//                                 input: "$reservations",
+//                                 as: "r",
+//                                 cond: { $eq: ["$$r.status", "No-show"] }
+//                             }
+//                         }
+//                     }
+//                 }
+//             },
+
+//             ...(minVisits ? [{ $match: { visits: { $gte: minVisits } } }] : []),
+//             ...(maxNoShows ? [{ $match: { noShows: { $lte: maxNoShows } } }] : []),
+
+//             // {
+//             //     $project: {
+//             //         guestId: "$_id",
+//             //         restaurantId: "$restaurantId",
+//             //         name: { $concat: ["$firstName", " ", "$lastName"] },
+//             //         remiId: 1,
+//             //         email: 1,
+//             //         phone: 1,
+//             //         visits: 1,
+//             //         venues: 1,
+//             //         lastVisit: 1,
+//             //         noShows: 1,
+//             //         _id: 0
+//             //     }
+//             // },
+
+//             {
+//                 $project: {
+//                     guestId: "$_id",
+
+//                     // 👇 BASIC USER INFO
+//                     firstName: 1,
+//                     lastName: 1,
+//                     email: 1,
+//                     secondaryEmail: 1,
+//                     phone: 1,
+//                     secondaryPhone: 1,
+//                     dob: 1,
+//                     address: 1,
+//                     anniversary: 1,
+//                     gender: 1,
+//                     createdAt: 1,
+//                     marketingOptIn: 1,
+
+//                     // 👇 OPTIONAL (agar frontend ko name chahiye)
+//                     name: { $concat: ["$firstName", " ", "$lastName"] },
+
+//                     // 👇 REMI / STATS
+//                     remiId: 1,
+//                     visits: 1,
+//                     venues: 1,
+//                     lastVisit: 1,
+//                     noShows: 1,
+
+//                     _id: 0
+//                 }
+//             },
+
+//             { $sort: { visits: -1 } },
+//             { $skip: skip },
+//             { $limit: Number(limit) }
+//         ];
+
+//         const [data, total] = await Promise.all([
+//             Guest.aggregate(pipeline),
+//             Guest.countDocuments(matchGuest)
+//         ]);
+
+//         return res.json({
+//             success: true,
+//             total,
+//             page: Number(page),
+//             limit: Number(limit),
+//             data
+//         });
+
+//     } catch (error) {
+//         console.error("Remi Users List Error:", error);
+//         res.status(500).json({
+//             success: false,
+//             message: "Failed to fetch Remi users list",
+//             error: error.message
+//         });
+//     }
+// };
+
 exports.getRemiUsersList = async (req, res) => {
     try {
-        const {
-            search = "",
-            page = 1,
-            limit = 10,
-            dateFrom,
-            dateTo,
-            minVisits,
-            maxNoShows
-        } = req.body;
-
-        const skip = (page - 1) * limit;
-        const REMI_REGEX = /(Remi user|Remi influencer)/i;
-
-        const matchGuest = {
-            tags: { $elemMatch: { $regex: REMI_REGEX } }
-        };
-
-        if (search) {
-            matchGuest.$or = [
-                { firstName: { $regex: search, $options: "i" } },
-                { lastName: { $regex: search, $options: "i" } },
-                { email: { $regex: search, $options: "i" } },
-                { phone: { $regex: search, $options: "i" } }
-            ];
-        }
-
-        const reservationMatch = {};
-        if (dateFrom && dateTo) {
-            reservationMatch.date = {
-                $gte: new Date(dateFrom),
-                $lte: new Date(dateTo)
-            };
-        }
 
         const pipeline = [
-            { $match: matchGuest },
+            //  Only users jinke paas remiId hai
+            {
+                $match: {
+                    remiId: { $exists: true, $ne: null }
+                }
+            },
 
+            //  Reservations lookup (for stats)
             {
                 $lookup: {
                     from: "reservations",
                     localField: "_id",
                     foreignField: "guestId",
-                    pipeline: [
-                        { $match: reservationMatch }
-                    ],
                     as: "reservations"
                 }
             },
 
+            //  Stats calculate
             {
                 $addFields: {
                     visits: { $size: "$reservations" },
@@ -618,45 +741,83 @@ exports.getRemiUsersList = async (req, res) => {
                 }
             },
 
-            ...(minVisits ? [{ $match: { visits: { $gte: minVisits } } }] : []),
-            ...(maxNoShows ? [{ $match: { noShows: { $lte: maxNoShows } } }] : []),
-
+            //  Response fields
             {
                 $project: {
                     guestId: "$_id",
-                    name: { $concat: ["$firstName", " ", "$lastName"] },
-                    remiId: 1,
+                    restaurantId: "$restaurantId",
+
+                    firstName: 1,
+                    lastName: 1,
                     email: 1,
+                    secondaryEmail: 1,
                     phone: 1,
+                    secondaryPhone: 1,
+                    address: 1,
+                    gender: 1,
+                    marketingOptIn: 1,
+
+                    name: { $concat: ["$firstName", " ", "$lastName"] },
+
+                    remiId: 1,
                     visits: 1,
                     venues: 1,
-                    lastVisit: 1,
                     noShows: 1,
+
+                    dob: {
+                        $cond: [
+                            { $ifNull: ["$dob", false] },
+                            { $dateToString: { format: "%Y-%m-%d", date: "$dob" } },
+                            null
+                        ]
+                    },
+
+                    anniversary: {
+                        $cond: [
+                            { $ifNull: ["$anniversary", false] },
+                            { $dateToString: { format: "%Y-%m-%d", date: "$anniversary" } },
+                            null
+                        ]
+                    },
+
+                    createdAt: {
+                        $cond: [
+                            { $ifNull: ["$createdAt", false] },
+                            { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                            null
+                        ]
+                    },
+
+                    lastVisit: {
+                        $cond: [
+                            { $ifNull: ["$lastVisit", false] },
+                            { $dateToString: { format: "%Y-%m-%d", date: "$lastVisit" } },
+                            null
+                        ]
+                    },
+
                     _id: 0
                 }
             },
 
-            { $sort: { visits: -1 } },
-            { $skip: skip },
-            { $limit: Number(limit) }
+            //  REMIID SORT (IMPORTANT)
+            { $sort: { remiId: 1 } },
         ];
 
         const [data, total] = await Promise.all([
             Guest.aggregate(pipeline),
-            Guest.countDocuments(matchGuest)
+            Guest.countDocuments({ remiId: { $exists: true, $ne: null } })
         ]);
 
-        return res.json({
+        return res.status(200).json({
             success: true,
             total,
-            page: Number(page),
-            limit: Number(limit),
             data
         });
 
     } catch (error) {
         console.error("Remi Users List Error:", error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Failed to fetch Remi users list",
             error: error.message
@@ -681,6 +842,7 @@ exports.editGuest = async (req, res) => {
             phone,
             secondaryPhone,
             address,
+            createdAt,
 
             notes,
             tags,
@@ -743,6 +905,7 @@ exports.editGuest = async (req, res) => {
         if (marketingOptIn !== undefined) guest.marketingOptIn = marketingOptIn;
 
         if (isActive !== undefined) guest.isActive = isActive;
+        if (createdAt !== undefined) guest.createdAt = createdAt;
 
         await guest.save();
 
@@ -757,6 +920,134 @@ exports.editGuest = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Error updating guest",
+            error: error.message
+        });
+    }
+};
+
+exports.getCrossVenue = async (req, res) => {
+    try {
+        const { guestId } = req.body || {};
+
+        if (!mongoose.Types.ObjectId.isValid(guestId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid guestId"
+            });
+        }
+
+        const data = await Reservation.aggregate([
+            //  Guest filter
+            {
+                $match: {
+                    guestId: new mongoose.Types.ObjectId(guestId)
+                }
+            },
+
+            //  Restaurant ke hisaab se group
+            {
+                $group: {
+                    _id: "$restaurantId",
+                    visits: { $sum: 1 },
+                    lastVisit: { $max: "$date" },
+                    noShows: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "No-show"] }, 1, 0]
+                        }
+                    }
+                }
+            },
+
+            //  Restaurant details lao
+            {
+                $lookup: {
+                    from: "restaurants",
+                    localField: "_id",
+                    foreignField: "_id",
+                    as: "restaurant"
+                }
+            },
+
+            { $unwind: "$restaurant" },
+
+            //  Final response format
+            {
+                $project: {
+                    _id: 1,
+                    // restaurantId: "$restaurant._id",
+                    restaurantName: "$restaurant.venueName",
+                    visits: 1,
+                    noShows: 1,
+                    lastVisit: {
+                        $dateToString: {
+                            format: "%d/%m/%Y",
+                            date: "$lastVisit"
+                        }
+                    }
+                }
+            },
+
+            //  Sort (optional)
+            { $sort: { visits: -1 } }
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            count: data.length,
+            data
+        });
+
+    } catch (error) {
+        console.error("Guest booking summary error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch guest booking summary",
+            error: error.message
+        });
+    }
+};
+
+exports.getGlobalVisit = async (req, res) => {
+    try {
+        const { guestId } = req.body || {};
+
+        if (!guestId) {
+            return res.status(400).json({
+                success: false,
+                message: "guestId is required"
+            });
+        }
+
+        const reservations = await Reservation.find({ guestId })
+            .select("_id date restaurantId partySize source status tableId")
+            .populate("restaurantId", "venueName")
+            .populate("tableId", "tableNumber")
+            .sort({ date: 1 });
+
+        const formattedData = reservations.map(d => ({
+            id: d._id,
+
+            date: d.date
+                ? d.date.toISOString().split("T")[0]
+                : null,
+
+            restaurantName: d.restaurantId?.venueName || null,
+            partySize: d.partySize,
+            source: d.source,
+            status: d.status,
+            tableNo: d.tableId?.tableNumber || null
+        }));
+
+        return res.status(200).json({
+            success: true,
+            count: formattedData.length,
+            data: formattedData
+        });
+
+    } catch (error) {
+        console.error("Get Global Visit Error:", error);
+        return res.status(500).json({
+            success: false,
             error: error.message
         });
     }

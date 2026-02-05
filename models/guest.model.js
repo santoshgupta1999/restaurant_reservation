@@ -1,7 +1,14 @@
 const mongoose = require("mongoose");
+const Counter = require("./Counter");
 
 const guestSchema = new mongoose.Schema(
     {
+        remiId: {
+            type: String,
+            unique: true,
+            index: true
+        },
+
         restaurantId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Restaurant",
@@ -41,5 +48,23 @@ const guestSchema = new mongoose.Schema(
     },
     { timestamps: true }
 );
+
+guestSchema.pre("save", async function (next) {
+    // agar remiId already hai → skip
+    if (this.remiId) return next();
+
+    try {
+        const counter = await Counter.findOneAndUpdate(
+            { name: "remi_user" },
+            { $inc: { seq: 1 } },
+            { new: true, upsert: true }
+        );
+
+        this.remiId = `RU-${String(counter.seq).padStart(3, "0")}`;
+        next();
+    } catch (err) {
+        next(err);
+    }
+});
 
 module.exports = mongoose.model("Guest", guestSchema);

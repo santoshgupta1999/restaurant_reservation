@@ -11,6 +11,7 @@ const { feedbackValidator, updateFeedbackValidator } = require('../validators/fe
 const { validate } = require('../middlewares/validationResultHandler');
 const { blockValidator, updateBlockValidator } = require('../validators/blockValidator');
 const { shiftValidator } = require('../validators/shiftValidator');
+const seatingPreference = require("../controllers/seatingPreference");
 
 
 // ------------------------------------------- Table ----------------------------------- //
@@ -63,5 +64,16 @@ router.post('/deleteShift', restaurantController.deleteShift);
 router.get('/shift/active/today', restaurantController.getActiveShiftsForToday);
 router.get('/getShiftsCalendarView', restaurantController.getShiftsCalendarView);
 router.post("/updateShiftStatus/:id", restaurantController.updateShiftStatus);
+
+// -------------------------------- Preference -------------------------
+
+router.post("/addPreference", seatingPreference.addSeatingPreference);
+router.delete("/deletePreference", seatingPreference.deleteSeatingPreference);
+router.post("/togglePreferenceStatus", seatingPreference.toggleSeatingPreferenceStatus);
+router.post("/getAllPreference", seatingPreference.getAllPreference);
+
+router.post("/addStaff", seatingPreference.saveStaffAccount);
+router.delete("/deleteStaff", seatingPreference.deleteStaff);
+router.post("/getAllStaff", seatingPreference.getAllStaff);
 
 module.exports = router;

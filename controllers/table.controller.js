@@ -57,8 +57,7 @@ exports.getAllTables = async (req, res) => {
         }
 
         const tablesRaw = await Table.find({
-            restaurantId,
-            isActive: true
+            restaurantId
         })
             .populate("joinedWith", "tableNumber")
             .sort({ roomName: 1, tableNumber: 1 });
