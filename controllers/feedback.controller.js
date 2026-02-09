@@ -1,5 +1,5 @@
 const Feedback = require('../models/feedback.model');
-const Restaurant = require('../models/restaurant.model');
+const Restaurant = require('../models/Restaurant.model');
 const Reservation = require('../models/reservation.model');
 const { default: mongoose } = require('mongoose');
 

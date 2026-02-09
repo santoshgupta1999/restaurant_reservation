@@ -70,6 +70,13 @@ const restaurantSchema = new mongoose.Schema(
             type: String,
             required: true
         },
+        // address: {
+        //     type: String,
+        // },
+
+        billingEmail: {
+            type: String,
+        },
 
         //  MANAGER
         managerEmail: {
@@ -84,9 +91,15 @@ const restaurantSchema = new mongoose.Schema(
         },
 
         //  PLAN / TIER
+        // tier: {
+        //     type: String,
+        //     required: true,
+        // },
+
         tier: {
-            type: String,
-            required: true,
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Tier",
+            required: true
         },
 
         status: {
@@ -130,7 +143,46 @@ const restaurantSchema = new mongoose.Schema(
         },
 
         menuLink: String,
-        openingHours: String,
+        // openingHours: String,
+
+        openingHours: {
+            monday: {
+                open: String,
+                close: String,
+                isClosed: { type: Boolean, default: false }
+            },
+            tuesday: {
+                open: String,
+                close: String,
+                isClosed: { type: Boolean, default: false }
+            },
+            wednesday: {
+                open: String,
+                close: String,
+                isClosed: { type: Boolean, default: false }
+            },
+            thursday: {
+                open: String,
+                close: String,
+                isClosed: { type: Boolean, default: false }
+            },
+            friday: {
+                open: String,
+                close: String,
+                isClosed: { type: Boolean, default: false }
+            },
+            saturday: {
+                open: String,
+                close: String,
+                isClosed: { type: Boolean, default: false }
+            },
+            sunday: {
+                open: String,
+                close: String,
+                isClosed: { type: Boolean, default: false }
+            }
+        },
+
 
         //  CREATED BY
         createdBy: {

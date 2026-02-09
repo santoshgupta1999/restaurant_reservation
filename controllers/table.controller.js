@@ -4,36 +4,262 @@ const Block = require('../models/block.model');
 const Shift = require('../models/shift.model');
 const mongoose = require('mongoose');
 
+// exports.createTable = async (req, res) => {
+//     try {
+//         const tableData = req.body;
+
+//         const existing = await Table.findOne({
+//             restaurantId: tableData.restaurantId,
+//             tableNumber: tableData.tableNumber,
+//         });
+
+//         if (existing) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Table number already exists for this restaurant.",
+//             });
+//         }
+
+//         const newTable = await Table.create(tableData);
+
+//         return res.status(201).json({
+//             success: true,
+//             message: "Table created successfully.",
+//             data: newTable,
+//         });
+
+//     } catch (error) {
+//         console.error("Error creating table:", error);
+//         res.status(500).json({
+//             success: false,
+//             message: "Error creating table.",
+//             error: error.message,
+//         });
+//     }
+// };
+
+// exports.createTable = async (req, res) => {
+//     try {
+//         const { restaurantId, rooms } = req.body;
+
+//         if (!restaurantId || !rooms?.length) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "restaurantId and rooms are required"
+//             });
+//         }
+
+//         let tablesToInsert = [];
+
+//         // 🔹 flatten payload
+//         for (const room of rooms) {
+//             if (!room.roomName || !room.tables) continue;
+
+//             for (const t of room.tables) {
+//                 tablesToInsert.push({
+//                     restaurantId,
+//                     roomName: room.roomName,
+//                     tableNumber: String(t.tableNumber).trim().toUpperCase(),
+//                     displayName: t.displayName || null,
+//                     capacity: t.capacity || 2,
+//                     shape: t.shape || "Square",
+//                     status: t.status || "Available",
+//                     position: t.position || { x: 0, y: 0 },
+//                     rotation: t.rotation || 0
+//                 });
+//             }
+//         }
+
+//         const total = tablesToInsert.length;
+
+//         if (!total) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "No tables provided"
+//             });
+//         }
+
+//         let insertedCount = 0;
+//         let skipped = [];
+
+//         try {
+//             const inserted = await Table.insertMany(tablesToInsert, {
+//                 ordered: false
+//             });
+//             insertedCount = inserted.length;
+
+//         } catch (error) {
+
+//             if (error?.writeErrors?.length) {
+
+//                 insertedCount = error.result?.nInserted || 0;
+
+//                 for (const e of error.writeErrors) {
+//                     const doc = e.err?.op || {};
+
+//                     let reason = "Duplicate table";
+
+//                     const msg =
+//                         e.errmsg ||
+//                         e.err?.errmsg ||
+//                         e.message ||
+//                         "";
+
+//                     if (msg.includes("tableNumber")) {
+//                         reason = "Same table number already exists in this room";
+//                     }
+
+//                     if (msg.includes("position")) {
+//                         reason = "Another table already exists at same position in this room";
+//                     }
+
+//                     skipped.push({
+//                         roomName: doc.roomName,
+//                         tableNumber: doc.tableNumber,
+//                         reason
+//                     });
+//                 }
+
+//             } else {
+//                 throw error;
+//             }
+//         }
+
+//         const skippedCount = skipped.length;
+
+//         let message = `${insertedCount} tables inserted successfully`;
+
+//         if (skippedCount) {
+//             message += `, ${skippedCount} skipped (duplicate number or position)`;
+//         }
+
+//         return res.status(201).json({
+//             success: true,
+//             message,
+//             stats: {
+//                 totalReceived: total,
+//                 inserted: insertedCount,
+//                 skipped: skippedCount
+//             },
+//             skippedTables: skipped
+//         });
+
+//     } catch (error) {
+//         console.error(error);
+//         res.status(500).json({
+//             success: false,
+//             message: "Error creating tables",
+//             error: error.message
+//         });
+//     }
+// };
+
 exports.createTable = async (req, res) => {
     try {
-        const tableData = req.body;
+        const { restaurantId, rooms } = req.body;
 
-        const existing = await Table.findOne({
-            restaurantId: tableData.restaurantId,
-            tableNumber: tableData.tableNumber,
-        });
-
-        if (existing) {
+        if (!restaurantId || !rooms?.length) {
             return res.status(400).json({
                 success: false,
-                message: "Table number already exists for this restaurant.",
+                message: "restaurantId and rooms required"
             });
         }
 
-        const newTable = await Table.create(tableData);
+        let tablesToInsert = [];
+        let skipped = [];
+
+        // 🔴 STEP 1: payload duplicate check
+        const positionMap = new Map();
+        const numberMap = new Map();
+
+        for (const room of rooms) {
+            for (const t of room.tables) {
+
+                const tableNumber = String(t.tableNumber).trim().toUpperCase();
+                const posKey = `${room.roomName}_${t.position?.x}_${t.position?.y}`;
+                const numKey = `${room.roomName}_${tableNumber}`;
+
+                // same number in payload
+                if (numberMap.has(numKey)) {
+                    skipped.push({
+                        roomName: room.roomName,
+                        tableNumber,
+                        reason: "Duplicate table number in request"
+                    });
+                    continue;
+                }
+
+                // same position in payload
+                if (positionMap.has(posKey)) {
+                    skipped.push({
+                        roomName: room.roomName,
+                        tableNumber,
+                        reason: "Duplicate position in request"
+                    });
+                    continue;
+                }
+
+                numberMap.set(numKey, true);
+                positionMap.set(posKey, true);
+
+                tablesToInsert.push({
+                    restaurantId,
+                    roomName: room.roomName,
+                    tableNumber,
+                    displayName: t.displayName || null,
+                    capacity: t.capacity || 2,
+                    shape: t.shape || "Square",
+                    status: "Available",
+                    position: t.position || { x: 0, y: 0 },
+                    rotation: t.rotation || 0
+                });
+            }
+        }
+
+        let insertedCount = 0;
+
+        // 🔴 STEP 2: DB insert
+        try {
+            const inserted = await Table.insertMany(tablesToInsert, {
+                ordered: false
+            });
+            insertedCount = inserted.length;
+
+        } catch (error) {
+
+            if (error?.writeErrors) {
+                insertedCount = error.result?.nInserted || 0;
+
+                for (const e of error.writeErrors) {
+                    const doc = e.err.op;
+
+                    skipped.push({
+                        roomName: doc.roomName,
+                        tableNumber: doc.tableNumber,
+                        reason: "Already exists in DB"
+                    });
+                }
+            } else {
+                throw error;
+            }
+        }
 
         return res.status(201).json({
             success: true,
-            message: "Table created successfully.",
-            data: newTable,
+            message: `${insertedCount} inserted, ${skipped.length} skipped`,
+            stats: {
+                inserted: insertedCount,
+                skipped: skipped.length,
+                totalReceived: insertedCount + skipped.length
+            },
+            skippedTables: skipped
         });
 
     } catch (error) {
-        console.error("Error creating table:", error);
+        console.error(error);
         res.status(500).json({
             success: false,
-            message: "Error creating table.",
-            error: error.message,
+            message: error.message
         });
     }
 };
@@ -41,6 +267,8 @@ exports.createTable = async (req, res) => {
 exports.getAllTables = async (req, res) => {
     try {
         const { restaurantId } = req.query;
+
+        console.log(restaurantId);
 
         if (!restaurantId) {
             return res.status(400).json({

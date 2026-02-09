@@ -48,9 +48,25 @@ exports.createReservation = async (req, res) => {
         }
 
         const reservationDate = new Date(date);
-        const weekdayName = reservationDate.toLocaleDateString("en-US", {
-            weekday: "long"
+        // const weekdayName = reservationDate.toLocaleDateString("en-US", {
+        //     weekday: "long"
+        // });
+
+        const shortDay = reservationDate.toLocaleDateString("en-US", {
+            weekday: "short"
         });
+
+        const map = {
+            Mon: "Mo",
+            Tue: "Tu",
+            Wed: "We",
+            Thu: "Th",
+            Fri: "Fr",
+            Sat: "Sa",
+            Sun: "Su"
+        };
+
+        const weekdayName = map[shortDay];
 
         /* ---------------------------------------------------
            🔹 SHIFT LOGIC (UNCHANGED)
@@ -71,7 +87,6 @@ exports.createReservation = async (req, res) => {
                 }
             ]
         });
-
         if (!allShifts.length) {
             return res.status(400).json({
                 success: false,
@@ -465,9 +480,8 @@ exports.updateReservationById = async (req, res) => {
         const finalTime = updateData.time || reservation.time;
 
         if (updateData.date || updateData.time) {
-            const weekdayName = finalDate.toLocaleDateString("en-US", {
-                weekday: "long"
-            });
+            const daysMap = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+            const weekdayName = daysMap[finalDate.getDay()];
 
             const shifts = await Shift.find({
                 restaurantId: reservation.restaurantId,

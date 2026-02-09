@@ -1,4 +1,6 @@
-const Restaurant = require("../models/Restaurant.model")
+const Restaurant = require("../models/Restaurant.model");
+const Reservation = require("../models/reservation.model");
+const Tier = require("../models/Tier");
 const Shift = require('../models/shift.model');
 const mongoose = require('mongoose');
 const fs = require('fs');
@@ -8,6 +10,53 @@ const { validationResult } = require("express-validator");
 const User = require("../models/user.model");
 const bcrypt = require("bcryptjs");
 
+
+// exports.createRestaurant = async (req, res) => {
+//     try {
+//         const {
+//             name, email, phone, address, openingHours
+//         } = req.body;
+
+//         const existingRestaurant = await Restaurant.findOne({ email });
+//         if (existingRestaurant) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'Email already in use. Please use another email.'
+//             });
+//         }
+
+//         const logo = req.files['logo']
+//             ? `${req.files['logo'][0].filename}`
+//             : null;
+
+//         const createdBy = req.user?._id;
+
+//         const newRestaurant = new Restaurant({
+//             name,
+//             email,
+//             phone,
+//             address,
+//             openingHours,
+//             logo,
+//             createdBy
+//         });
+
+//         await newRestaurant.save();
+//         return res.status(201).json({
+//             success: true,
+//             message: 'Restaurant created successfully',
+//             data: newRestaurant
+//         });
+
+//     } catch (err) {
+//         console.error('Error creating restaurant:', err);
+//         res.status(500).json({
+//             success: false,
+//             message: 'Error creating restaurant',
+//             error: err.message
+//         });
+//     }
+// };
 
 
 exports.createRestaurant = async (req, res) => {
@@ -30,46 +79,107 @@ exports.createRestaurant = async (req, res) => {
             googleMapsLink,
             menuLink,
             openingHours,
+
             instagram,
             facebook,
             tiktok,
             x
         } = req.body;
 
-        const existingRestaurant = await Restaurant.findOne({ managerEmail });
-        if (existingRestaurant) {
-            return res.status(400).json({
-                success: false,
-                message: 'Email already in use. Please use another email.'
-            });
+        if (typeof openingHours === "string") {
+            openingHours = JSON.parse(openingHours);
+        }
+        if (typeof cuisines === "string") {
+            cuisines = JSON.parse(cuisines);
+        }
+        if (typeof vibeTags === "string") {
+            vibeTags = JSON.parse(vibeTags);
         }
 
-        // 🟢 STATUS FIX (schema enum capital me hai)
-        status = status ? status.trim() : "Trial";
-
         // REQUIRED
-        if (!venueName || !country || !city || !managerEmail || !tier) {
+        if (!venueName || !country || !city || !managerEmail || !tier || !status) {
             return res.status(400).json({
                 message: "Required fields missing"
             });
         }
 
+        // Validate tier ID
+        if (!mongoose.Types.ObjectId.isValid(tier)) {
+            return res.status(400).json({ message: "Invalid tier ID" });
+        }
+
+        const tierExists = await Tier.findOne({
+            _id: tier,
+            status: "Active"
+        });
+        if (!tierExists) {
+            return res.status(400).json({ message: "No Active Tier not found" });
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(managerEmail)) {
+            return res.status(400).json({ message: "Invalid manager email" });
+        }
+
+        // agar Trial hai aur date nahi di
         if (status === "Trial" && !trialEndDate) {
             return res.status(400).json({
-                message: "Trial end date required"
+                message: "Trial end date required for trial plan"
             });
         }
 
-        // IMAGE
-        let heroImage = null;
-        if (req.file) heroImage = req.file.filename;
+        // agar Trial nahi hai aur date di hui hai
+        if (status !== "Trial" && trialEndDate) {
+            return res.status(400).json({
+                message: "Trial end date only allowed when status is Trial"
+            });
+        }
 
-        // CREATE VENUE (SCHEMA FIELD NAMES MATCH)
+        const existingRestaurant = await Restaurant.findOne({ managerEmail });
+        if (existingRestaurant) {
+            return res.status(400).json({
+                message: 'Manager email already in use'
+            });
+        }
+
+        // STATUS & trialEndDate
+        status = status.trim();
+        const allowedStatus = ["Trial", "Active", "Suspended", "Locked"];
+        if (!allowedStatus.includes(status)) {
+            return res.status(400).json({ message: "Invalid status" });
+        }
+        if (status === "Trial") {
+            if (!trialEndDate) return res.status(400).json({ message: "Trial end date required" });
+            if (new Date(trialEndDate) <= new Date()) return res.status(400).json({ message: "Trial end date must be future date" });
+        } else if (trialEndDate) {
+            return res.status(400).json({ message: "Trial end date only allowed when status is Trial" });
+        }
+
+        // Validate cuisines and vibeTags
+        if (cuisines) {
+            if (!Array.isArray(cuisines) || cuisines.length > 3) {
+                return res.status(400).json({ message: "Max 3 cuisines allowed" });
+            }
+        }
+
+        if (vibeTags) {
+            if (!Array.isArray(vibeTags) || vibeTags.length > 3) {
+                return res.status(400).json({ message: "Max 3 vibe tags allowed" });
+            }
+        }
+
+        // IMAGE upload
+        let heroImage = null;
+        if (req.files?.heroImage?.length > 0) {
+            heroImage = req.files.heroImage[0].filename;
+        }
+
+        // CREATE RESTAURANT
         const venue = new Restaurant({
-            venueName: venueName,
-            country,
-            city,
-            managerEmail,
+            venueName: venueName.trim(),
+            country: country.trim(),
+            city: city.trim(),
+            managerEmail: managerEmail.toLowerCase(),
             tier,
             status,
             trialEndDate,
@@ -82,31 +192,20 @@ exports.createRestaurant = async (req, res) => {
             googleMapsLink,
             menuLink,
             openingHours,
-
-            socialHandles: {
-                instagram,
-                facebook,
-                tiktok,
-                x
-            },
-
+            socialHandles: { instagram, facebook, tiktok, x },
             heroImage,
             createdBy: req.user?._id
         });
 
         await venue.save();
 
-        // CREATE MANAGER USER
-        let manager = await User.findOne({ email: managerEmail });
-
+        // CREATE MANAGER USER if not exists
+        let manager = await User.findOne({ email: managerEmail.toLowerCase() });
         if (!manager) {
-            const tempPassword = "Temp@123";
-            const hashed = await bcrypt.hash(tempPassword, 10);
-
-
+            const hashed = await bcrypt.hash("Temp@123", 10);
             manager = await User.create({
-                name: "abc",
-                email: managerEmail,
+                name: "Manager",
+                email: managerEmail.toLowerCase(),
                 password: hashed,
                 role: "manager",
                 restaurantId: venue._id
@@ -118,18 +217,197 @@ exports.createRestaurant = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: "Venue + Manager created",
+            message: "Restaurant + Manager created successfully",
             venue
         });
 
     } catch (err) {
-        console.log(err);
-        res.status(500).json({
-            message: err.message
-        });
+        console.error(err);
+        res.status(500).json({ message: err.message });
     }
 };
 
+exports.editVenue = async (req, res) => {
+    try {
+        let {
+            venueId,
+            venueName,
+            address,
+            googleMapsLink,
+            website,
+            cuisines,
+            pricePoint,
+            longDescription,
+            createdAt
+        } = req.body || {};
+
+        if (!venueId) return res.status(400).json({ success: false, message: "venueId is required" });
+
+        const restaurant = await Restaurant.findById(venueId);
+        if (!restaurant) {
+            return res.status(404).json({
+                success: false,
+                message: "Restaurant not found"
+            });
+        }
+
+        if (!venueName || venueName.trim() === "") {
+            return res.status(400).json({
+                success: false,
+                message: "venueName is required"
+            });
+        }
+
+        if (!address || address.trim() === "") {
+            return res.status(400).json({
+                success: false,
+                message: "address is required"
+            });
+        }
+
+        if (!googleMapsLink || googleMapsLink.trim() === "") {
+            return res.status(400).json({
+                success: false,
+                message: "googleMapsLink is required"
+            });
+        }
+
+        if (!website || website.trim() === "") {
+            return res.status(400).json({
+                success: false,
+                message: "website is required"
+            });
+        }
+
+        // BASIC
+        restaurant.venueName = venueName.trim();
+        restaurant.city = address.trim();
+        restaurant.googleMapsLink = googleMapsLink.trim();
+        restaurant.website = website.trim();
+        if (pricePoint) restaurant.pricePoint = pricePoint;
+        if (longDescription) restaurant.longDescription = longDescription;
+
+        // cuisines array (max 3)
+        if (cuisines) {
+            let cuisineArray = typeof cuisines === "string" ? JSON.parse(cuisines) : cuisines;
+            if (!Array.isArray(cuisineArray)) cuisineArray = [cuisineArray];
+            if (cuisineArray.length > 3) return res.status(400).json({ message: "Max 3 cuisines allowed" });
+            restaurant.cuisines = cuisineArray;
+        }
+
+        if (createdAt) {
+            const date = new Date(createdAt);
+            if (isNaN(date.getTime())) {
+                return res.status(400).json({ message: "Invalid createdAt date" });
+            }
+            restaurant.createdAt = date;
+        }
+
+
+        // image
+        if (req.file) {
+            // old image delete
+            if (restaurant.heroImage) {
+                const fs = require("fs");
+                const path = require("path");
+
+                const oldPath = path.join(
+                    __dirname,
+                    "../uploads/restaurants",
+                    restaurant.heroImage
+                );
+
+                if (fs.existsSync(oldPath)) {
+                    fs.unlinkSync(oldPath);
+                }
+            }
+
+            restaurant.heroImage = req.file.filename;
+        }
+
+        await restaurant.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Restaurant updated successfully"
+        });
+
+    } catch (err) {
+        console.log(err);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+exports.opertionalMetrics = async (req, res) => {
+    try {
+        const { venueId } = req.body || {};
+
+        if (!mongoose.Types.ObjectId.isValid(venueId)) {
+            return res.status(400).json({ message: "Invalid venueId" });
+        }
+
+        const restaurant = await Restaurant.findById(venueId);
+        if (!restaurant) {
+            return res.status(404).json({ message: "Venue not found" });
+        }
+
+        // last 30 days date
+        const last30 = new Date();
+        last30.setDate(last30.getDate() - 30);
+
+        // all reservations last 30 days
+        const reservations = await Reservation.find({
+            restaurantId: venueId,
+            date: { $gte: last30 }
+        });
+
+        // total bookings
+        const totalBookings = reservations.length;
+
+        // no show
+        const noShowCount = reservations.filter(
+            r => r.status === "No-show"
+        ).length;
+
+        const noShowRate =
+            totalBookings === 0
+                ? 0
+                : ((noShowCount / totalBookings) * 100).toFixed(1);
+
+        // last booking
+        const lastBooking = await Reservation.findOne({
+            restaurantId: venueId
+        }).sort({ date: -1 });
+
+        // unique users
+        const uniqueUsers = await Reservation.distinct("guestId", {
+            restaurantId: venueId,
+            guestId: { $ne: null }
+        });
+
+        let enabledFeatures = [];
+        if (restaurant.tier) {
+            const tier = await Tier.findById(restaurant.tier);
+            if (tier && tier.features) {
+                for (const [key, value] of Object.entries(tier.features)) {
+                    if (value === true) enabledFeatures.push(key); // only push name
+                }
+            }
+        }
+
+        res.json({
+            totalBookingsLast30Days: totalBookings,
+            noShowRateLast30Days: Number(noShowRate),
+            lastBooking: lastBooking ? lastBooking.date : null,
+            uniqueRemiUsersTouched: uniqueUsers.length,
+            enabledTierFeatures: enabledFeatures
+        });
+
+    } catch (err) {
+        console.log(err);
+        res.status(500).json({ message: "Server error" });
+    }
+};
 
 exports.getRestaurants = async (req, res) => {
     try {
@@ -867,10 +1145,14 @@ exports.updateShiftStatus = async (req, res) => {
     }
 };
 
+
 exports.getVenueList = async (req, res) => {
     try {
+        let sortStage = { remiId: 1 }; // default ASC
 
         const venues = await Restaurant.aggregate([
+
+            // 🔗 join reservations for last booking
             {
                 $lookup: {
                     from: "reservations",
@@ -886,7 +1168,6 @@ exports.getVenueList = async (req, res) => {
                 }
             },
 
-            // 📅 format last booking
             {
                 $addFields: {
                     lastBooking: {
@@ -929,20 +1210,40 @@ exports.getVenueList = async (req, res) => {
                 }
             },
 
+            // 🔗 join Tier collection to get tierName
+            {
+                $lookup: {
+                    from: "tiers",           // collection name
+                    localField: "tier",
+                    foreignField: "_id",
+                    as: "tierData"
+                }
+            },
+            { $unwind: { path: "$tierData", preserveNullAndEmptyArrays: true } },
+            { $addFields: { tierName: "$tierData.tierName" } },
+
+            // ✅ select only required fields
             {
                 $project: {
                     venueName: 1,
                     remiId: 1,
                     city: 1,
-                    tier: 1,
+                    tierName: 1,
                     status: 1,
+                    googleMapsLink: 1,
+                    website: 1,
                     managerEmail: 1,
                     lastBooking: 1,
+                    cuisines: 1,
+                    pricePoint: 1,
+                    longDescription: 1,
+                    createdAt: 1,
                     trialDaysLeft: 1
                 }
             },
 
-            { $sort: { createdAt: -1 } }
+            { $sort: sortStage }
+
         ]);
 
         res.json({
@@ -958,4 +1259,90 @@ exports.getVenueList = async (req, res) => {
         });
     }
 };
+
+exports.editVenuePlanAndStatus = async (req, res) => {
+    try {
+        const {
+            venueId,
+            tier,                  // Plan / Tier (ObjectId)
+            status,                // Trial, Active, Suspended, Locked
+            trialEndDate,          // Required if Trial
+            billingEmail,          // Optional
+        } = req.body;
+
+        if (!venueId || !mongoose.Types.ObjectId.isValid(venueId)) {
+            return res.status(400).json({ success: false, message: "Invalid venueId" });
+        }
+
+        const venue = await Restaurant.findById(venueId);
+        if (!venue) {
+            return res.status(404).json({ success: false, message: "Venue not found" });
+        }
+
+        if (!tier || !status || !billingEmail) {
+            return res.status(400).json({
+                success: false,
+                message: "Requried filled is missing"
+            })
+        }
+
+        if (tier) {
+            if (!mongoose.Types.ObjectId.isValid(tier)) {
+                return res.status(400).json({ success: false, message: "Invalid Tier ID" });
+            }
+            const tierExists = await Tier.findById(tier);
+            if (!tierExists) {
+                return res.status(400).json({ success: false, message: "Tier not found" });
+            }
+            venue.tier = tier;
+        }
+
+        const allowedStatus = ["Trial", "Active", "Suspended", "Locked"];
+        if (status) {
+            if (!allowedStatus.includes(status)) {
+                return res.status(400).json({ success: false, message: "Invalid status" });
+            }
+            venue.status = status;
+        }
+
+        //  Validate Trial End Date
+        if (status === "Trial") {
+            if (!trialEndDate) {
+                return res.status(400).json({ success: false, message: "Trial End Date is required for Trial status" });
+            }
+            const trialDate = new Date(trialEndDate);
+            if (isNaN(trialDate.getTime()) || trialDate <= new Date()) {
+                return res.status(400).json({ success: false, message: "Trial End Date must be a valid future date" });
+            }
+            venue.trialEndDate = trialDate;
+        } else {
+            // Remove trialEndDate if status is not Trial
+            venue.trialEndDate = undefined;
+        }
+
+        //  Billing info
+        if (billingEmail) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(billingEmail)) {
+                return res.status(400).json({ success: false, message: "Invalid billing email" });
+            }
+            venue.billingEmail = billingEmail.toLowerCase();
+        }
+
+        await venue.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Venue plan and status updated",
+            venue
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        })
+    }
+}
+
 
