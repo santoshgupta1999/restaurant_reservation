@@ -108,9 +108,10 @@ exports.createTier = async (req, res) => {
         });
     }
 };
+
 exports.getTiers = async (req, res) => {
     try {
-        const tiers = await Tier.find().select("_id tierName description basePrice");
+        const tiers = await Tier.find().select("_id tierName description basePrice status");
 
         if (!tiers.length) {
             return res.status(400).json({
@@ -133,7 +134,8 @@ exports.getTiers = async (req, res) => {
                 tierName: t.tierName,
                 description: t.description,
                 basePrice: t.basePrice,
-                totalVenues: count
+                totalVenues: count,
+                status: t.status
             });
         }
 

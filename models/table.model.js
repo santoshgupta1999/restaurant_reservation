@@ -10,7 +10,6 @@ const tableSchema = new mongoose.Schema(
 
         roomName: {
             type: String,
-            enum: ["Main Dining", "First Floor", "Bar", "Outdoor", "Terrace"],
             required: true,
         },
 
@@ -30,6 +29,30 @@ const tableSchema = new mongoose.Schema(
             type: Number,
             required: true,
             min: 1,
+        },
+        //
+
+        min: {
+            type: Number,
+            default: 1
+        },
+        max: {
+            type: Number,
+            default: 6
+        },
+        width: {
+            type: Number,
+            default: 0
+        },
+        length: {
+            type: Number,
+            default: 0
+        },
+
+        channel: {
+            type: String,
+            enum: ["Online & FOH", "Online only", "FOH only"],
+            default: "Online & FOH",
         },
 
         shape: {

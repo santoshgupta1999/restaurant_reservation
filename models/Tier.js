@@ -16,7 +16,7 @@ const tierSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ["Active", "InActive"],
+            enum: ["Active", "Archived"],
             default: "Active"
         },
 

@@ -9,14 +9,10 @@ const { validate } = require('../middlewares/validationResultHandler');
 const { verifyToken, requireRole } = require('../middlewares/auth.middleware');
 const upload = require('../middlewares/upload.middleware');
 const seatingPreference = require("../controllers/seatingPreference");
-const restaurantController = require("../controllers/restaurant.controller")
+const restaurantController = require("../controllers/restaurant.controller");
+const TierController = require("../controllers/tier.controller");
+const DashboardController = require("../controllers/dashboard.controller");
 
-
-
-router.post('/restaurants',
-    upload.fields([
-        { name: 'heroImage', maxCount: 1 },
-    ]), restController.createRestaurant);
 
 router.get('/restaurants', restController.getRestaurants);
 router.get('/restaurants/:id', restController.getRestaurantById);
@@ -29,6 +25,8 @@ router.put('/restaurants/:id',
 router.delete('/restaurants/:id', verifyToken, restController.deleteRestaurant);
 router.get('/getActiveRestaurants', verifyToken, restController.getActiveRestaurants);
 router.put('/updateRestaurantStatus/:id', restController.updateRestaurantStatus);
+
+// ------------------------ Restaurant edit details admin side  -------------------------- //
 
 // ------------------------------------------- Guest ---------------------------------------------- //
 
@@ -46,6 +44,22 @@ router.post('/getRemiUsersList/getGlobalVisit', guestController.getGlobalVisit);
 
 // restaurant
 
-router.post('/getVenueList', restaurantController.getVenueList);
+
+router.post('/venues/add', upload.fields([{ name: 'heroImage', maxCount: 1 },]), restController.createRestaurant);
+router.post('/venues/edit', upload.single("heroImage"), restController.editVenue);
+router.post('/venues/editPlanStatus', restController.editVenuePlanAndStatus);
+router.post('/venues/opertionalMetrics', restController.opertionalMetrics);
+router.post('/venues', restaurantController.getVenueList);
+
+// Tier
+router.post("/tiers/add", TierController.createTier)
+router.post("/tiers", TierController.getTiers)
+
+// dashborad
+router.post("/dashboard/venues", DashboardController.getVenues);
+router.post("/dashboard/getBooking24hTrend", DashboardController.getBooking24hTrend);
+router.post("/dashboard/getBookingKPIs", DashboardController.getBookingKPIs);
+router.post("/dashboard/mostActiveVenues", DashboardController.mostActiveVenues);
+router.post("/dashboard/getRemiUsersStats", DashboardController.getRemiUsersStats);
 
 module.exports = router;

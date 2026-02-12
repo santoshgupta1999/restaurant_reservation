@@ -1235,6 +1235,13 @@ exports.getVenueList = async (req, res) => {
                     managerEmail: 1,
                     lastBooking: 1,
                     cuisines: 1,
+                    heroImage: {
+                        $cond: [
+                            { $ifNull: ["$heroImage", false] },
+                            { $concat: [process.env.BASE_URL, "/uploads/restaurants/others/", "$heroImage"] },
+                            null
+                        ]
+                    },
                     pricePoint: 1,
                     longDescription: 1,
                     createdAt: 1,

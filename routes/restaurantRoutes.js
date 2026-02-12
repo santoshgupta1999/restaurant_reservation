@@ -21,7 +21,12 @@ router.get('/table', tableController.getAllTables);
 router.get('/table/:id', tableController.getTableById);
 router.get('/tables/available', tableController.getAvailableTables);
 router.put('/table/update/:id', tableController.updateTable);
-router.delete('/table/:id', tableController.deleteTable);
+
+router.post('/deleteTable', tableController.deleteTable);
+router.post('/deleteDecorative', tableController.deleteDecorative);
+router.post('/deleteRoom', tableController.deleteRoom);
+
+router.post('/updateRoomLayout', tableController.bulkUpdateLayout);
 
 router.post('/mergeTables', tableController.mergeTables);
 router.put('/unmergeTables/:tableId', tableController.unmergeTables);

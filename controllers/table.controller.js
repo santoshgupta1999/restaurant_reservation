@@ -2,6 +2,7 @@ const Table = require('../models/table.model');
 const Reservation = require('../models/reservation.model');
 const Block = require('../models/block.model');
 const Shift = require('../models/shift.model');
+const RoomDecorative = require('../models/roomDecorative.model');
 const mongoose = require('mongoose');
 
 // exports.createTable = async (req, res) => {
@@ -158,108 +159,220 @@ exports.createTable = async (req, res) => {
     try {
         const { restaurantId, rooms } = req.body;
 
-        if (!restaurantId || !rooms?.length) {
+        if (!restaurantId || !Array.isArray(rooms) || !rooms.length) {
             return res.status(400).json({
                 success: false,
-                message: "restaurantId and rooms required"
+                message: "restaurantId and rooms are required"
             });
         }
 
         let tablesToInsert = [];
+        let decorativesToInsert = [];
         let skipped = [];
 
-        // 🔴 STEP 1: payload duplicate check
-        const positionMap = new Map();
-        const numberMap = new Map();
+        const tableNumberMap = new Map();
+        const positionMap = new Map(); // table + decorative common
 
+        /* ---------------- PAYLOAD VALIDATION ---------------- */
         for (const room of rooms) {
-            for (const t of room.tables) {
+            if (!room.roomName) continue;
 
-                const tableNumber = String(t.tableNumber).trim().toUpperCase();
-                const posKey = `${room.roomName}_${t.position?.x}_${t.position?.y}`;
-                const numKey = `${room.roomName}_${tableNumber}`;
+            /* ---------- TABLES ---------- */
+            if (Array.isArray(room.tables)) {
+                for (const t of room.tables) {
+                    if (!t.tableNumber || !t.position) continue;
 
-                // same number in payload
-                if (numberMap.has(numKey)) {
-                    skipped.push({
+                    const tableNumber = String(t.tableNumber).trim().toUpperCase();
+                    const numKey = `${restaurantId}_${room.roomName}_${tableNumber}`;
+                    const posKey = `${restaurantId}_${room.roomName}_${t.position.x}_${t.position.y}`;
+
+                    if (tableNumberMap.has(numKey)) {
+                        skipped.push({
+                            roomName: room.roomName,
+                            ref: tableNumber,
+                            type: "TABLE",
+                            reason: "Duplicate tableNumber in request"
+                        });
+                        continue;
+                    }
+
+                    if (positionMap.has(posKey)) {
+                        skipped.push({
+                            roomName: room.roomName,
+                            ref: tableNumber,
+                            type: "TABLE",
+                            reason: "Duplicate position in request"
+                        });
+                        continue;
+                    }
+
+                    tableNumberMap.set(numKey, true);
+                    positionMap.set(posKey, true);
+
+                    tablesToInsert.push({
+                        restaurantId,
                         roomName: room.roomName,
                         tableNumber,
-                        reason: "Duplicate table number in request"
+                        displayName: t.displayName || null,
+                        capacity: t.capacity || 2,
+                        min: t.min || 1,
+                        max: t.max || t.capacity || 6,
+                        width: t.width || 0,
+                        length: t.length || 0,
+                        channel: t.channel || "Online & FOH",
+                        shape: t.shape || "Square",
+                        status: "Available",
+                        position: t.position,
+                        rotation: t.rotation || 0
                     });
-                    continue;
                 }
+            }
 
-                // same position in payload
-                if (positionMap.has(posKey)) {
-                    skipped.push({
+            /* ---------- DECORATIVES ---------- */
+            if (Array.isArray(room.decoratives)) {
+                for (const d of room.decoratives) {
+                    if (!d.name || !d.position) continue;
+
+                    const posKey = `${restaurantId}_${room.roomName}_${d.position.x}_${d.position.y}`;
+
+                    if (positionMap.has(posKey)) {
+                        skipped.push({
+                            roomName: room.roomName,
+                            ref: d.name,
+                            type: "DECORATIVE",
+                            reason: "Position already used (table/decorative)"
+                        });
+                        continue;
+                    }
+
+                    positionMap.set(posKey, true);
+
+                    decorativesToInsert.push({
+                        restaurantId,
                         roomName: room.roomName,
-                        tableNumber,
-                        reason: "Duplicate position in request"
+                        name: d.name,
+                        width: d.width || 0,
+                        length: d.length || 0,
+                        position: d.position,
+                        rotation: d.rotation || 0,
+                        isActive: true
                     });
-                    continue;
                 }
-
-                numberMap.set(numKey, true);
-                positionMap.set(posKey, true);
-
-                tablesToInsert.push({
-                    restaurantId,
-                    roomName: room.roomName,
-                    tableNumber,
-                    displayName: t.displayName || null,
-                    capacity: t.capacity || 2,
-                    shape: t.shape || "Square",
-                    status: "Available",
-                    position: t.position || { x: 0, y: 0 },
-                    rotation: t.rotation || 0
-                });
             }
         }
 
-        let insertedCount = 0;
+        /* ---------------- DB VALIDATION ---------------- */
 
-        // 🔴 STEP 2: DB insert
-        try {
-            const inserted = await Table.insertMany(tablesToInsert, {
-                ordered: false
+        for (const t of tablesToInsert) {
+
+            const existingTable = await Table.findOne({
+                restaurantId,
+                roomName: t.roomName,
+                tableNumber: t.tableNumber
             });
-            insertedCount = inserted.length;
 
-        } catch (error) {
+            // Check if some OTHER table already occupies this position
+            const positionConflict = await Table.findOne({
+                restaurantId,
+                roomName: t.roomName,
+                "position.x": t.position.x,
+                "position.y": t.position.y,
+                tableNumber: { $ne: t.tableNumber } // exclude itself
+            });
 
-            if (error?.writeErrors) {
-                insertedCount = error.result?.nInserted || 0;
+            // Check decorative conflict
+            const decorativeConflict = await RoomDecorative.findOne({
+                restaurantId,
+                roomName: t.roomName,
+                "position.x": t.position.x,
+                "position.y": t.position.y
+            });
 
-                for (const e of error.writeErrors) {
-                    const doc = e.err.op;
+            if (positionConflict || decorativeConflict) {
+                skipped.push({
+                    roomName: t.roomName,
+                    ref: t.tableNumber,
+                    type: "TABLE",
+                    reason: "Position already occupied"
+                });
+                continue;
+            }
 
-                    skipped.push({
-                        roomName: doc.roomName,
-                        tableNumber: doc.tableNumber,
-                        reason: "Already exists in DB"
-                    });
-                }
+            if (existingTable) {
+                //UPDATE
+                await Table.updateOne(
+                    { _id: existingTable._id },
+                    { $set: t }
+                );
             } else {
-                throw error;
+                //CREATE
+                await Table.create(t);
+            }
+        }
+
+        for (const d of decorativesToInsert) {
+
+            const existingDecorative = await RoomDecorative.findOne({
+                restaurantId,
+                roomName: d.roomName,
+                name: d.name
+            });
+
+            // 🔎 Position conflict with OTHER decorative
+            const positionConflict = await RoomDecorative.findOne({
+                restaurantId,
+                roomName: d.roomName,
+                "position.x": d.position.x,
+                "position.y": d.position.y,
+                name: { $ne: d.name } // exclude itself
+            });
+
+            // 🔎 Conflict with table
+            const tableConflict = await Table.findOne({
+                restaurantId,
+                roomName: d.roomName,
+                "position.x": d.position.x,
+                "position.y": d.position.y
+            });
+
+            if (positionConflict || tableConflict) {
+                skipped.push({
+                    roomName: d.roomName,
+                    ref: d.name,
+                    type: "DECORATIVE",
+                    reason: "Position already occupied"
+                });
+                continue;
+            }
+
+            if (existingDecorative) {
+                // UPDATE
+                await RoomDecorative.updateOne(
+                    { _id: existingDecorative._id },
+                    { $set: d }
+                );
+            } else {
+                // CREATE
+                await RoomDecorative.create(d);
             }
         }
 
         return res.status(201).json({
             success: true,
-            message: `${insertedCount} inserted, ${skipped.length} skipped`,
+            message: "Room layout published successfully",
             stats: {
-                inserted: insertedCount,
-                skipped: skipped.length,
-                totalReceived: insertedCount + skipped.length
+                tablesInserted: tablesToInsert.length,
+                decorativesInserted: decorativesToInsert.length,
+                skipped: skipped.length
             },
-            skippedTables: skipped
+            skipped
         });
 
     } catch (error) {
         console.error(error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
-            message: error.message
+            message: "Server error"
         });
     }
 };
@@ -268,78 +381,90 @@ exports.getAllTables = async (req, res) => {
     try {
         const { restaurantId } = req.query;
 
-        console.log(restaurantId);
-
         if (!restaurantId) {
             return res.status(400).json({
                 success: false,
-                message: "restaurantId is required.",
+                message: "restaurantId is required."
             });
         }
 
         if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid restaurantId.",
-            });
-        }
-
-        const tablesRaw = await Table.find({
-            restaurantId
-        })
-            .populate("joinedWith", "tableNumber")
-            .sort({ roomName: 1, tableNumber: 1 });
-
-        if (!tablesRaw.length) {
-            return res.status(404).json({
-                success: false,
-                message: "No active tables found for this restaurant.",
+                message: "Invalid restaurantId."
             });
         }
 
         /* ===============================
-           DATE TRIM FUNCTION
+           FETCH TABLES
         =============================== */
-        const formatTableDates = (table) => {
-            const obj = table.toObject();
+        const tablesRaw = await Table.find({ restaurantId })
+            .populate("joinedWith", "tableNumber")
+            .sort({ roomName: 1, tableNumber: 1 });
 
-            if (obj.createdAt) {
-                obj.createdAt = new Date(obj.createdAt)
-                    .toISOString()
-                    .split("T")[0];
-            }
+        /* ===============================
+           FETCH DECORATIVES
+        =============================== */
+        const decorativesRaw = await RoomDecorative.find({
+            restaurantId,
+            isActive: true
+        }).sort({ roomName: 1 });
 
-            if (obj.updatedAt) {
-                obj.updatedAt = new Date(obj.updatedAt)
-                    .toISOString()
-                    .split("T")[0];
-            }
-
+        /* ===============================
+           DATE FORMATTER
+        =============================== */
+        const formatDates = (doc) => {
+            const obj = doc.toObject();
+            if (obj.createdAt) obj.createdAt = obj.createdAt.toISOString().split("T")[0];
+            if (obj.updatedAt) obj.updatedAt = obj.updatedAt.toISOString().split("T")[0];
             return obj;
         };
 
-        const tables = tablesRaw.map(formatTableDates);
+        const tables = tablesRaw.map(formatDates);
+        const decoratives = decorativesRaw.map(formatDates);
 
-        const groupedTables = tables.reduce((acc, table) => {
-            if (!acc[table.roomName]) acc[table.roomName] = [];
-            acc[table.roomName].push(table);
-            return acc;
-        }, {});
+        /* ===============================
+           GROUP BY ROOM
+        =============================== */
+        const roomMap = {};
+
+        // tables group
+        for (const table of tables) {
+            if (!roomMap[table.roomName]) {
+                roomMap[table.roomName] = {
+                    tables: [],
+                    decoratives: []
+                };
+            }
+            roomMap[table.roomName].tables.push(table);
+        }
+
+        // decoratives group
+        for (const decor of decoratives) {
+            if (!roomMap[decor.roomName]) {
+                roomMap[decor.roomName] = {
+                    tables: [],
+                    decoratives: []
+                };
+            }
+            roomMap[decor.roomName].decoratives.push(decor);
+        }
 
         return res.status(200).json({
             success: true,
-            message: "Active tables fetched successfully.",
-            totalRooms: Object.keys(groupedTables).length,
-            totalTables: tables.length,
-            data: groupedTables,
+            message: "Tables & decoratives fetched successfully.",
+            totalRooms: Object.keys(roomMap).length,
+            totalTable: tablesRaw.length,
+            totalDecorative: decorativesRaw.length,
+            data: roomMap
         });
 
     } catch (error) {
-        console.error("Error fetching tables:", error);
+        console.error("Error fetching tables & decoratives:", error);
         return res.status(500).json({
             success: false,
-            message: "Error fetching tables.",
-            error: error.message,
+            message: "Error fetching data",
+            error: error.message
         });
     }
 };
@@ -372,80 +497,431 @@ exports.getTableById = async (req, res) => {
     }
 };
 
+const checkPositionConflict = async ({
+    restaurantId,
+    roomName,
+    position,
+    excludeId,
+    excludeType // "TABLE" | "DECORATIVE"
+}) => {
+
+    if (!position || !roomName) return false;
+
+    const baseQuery = {
+        restaurantId,
+        roomName,
+        "position.x": position.x,
+        "position.y": position.y
+    };
+
+    // Check TABLES
+    const tableConflict = await Table.findOne({
+        ...baseQuery,
+        ...(excludeType === "TABLE" && { _id: { $ne: excludeId } })
+    });
+
+    if (tableConflict) return {
+        type: "TABLE",
+        ref: tableConflict.tableNumber
+    };
+
+    // Check DECORATIVES
+    const decorativeConflict = await RoomDecorative.findOne({
+        ...baseQuery,
+        ...(excludeType === "DECORATIVE" && { _id: { $ne: excludeId } })
+    });
+
+    if (decorativeConflict) return {
+        type: "DECORATIVE",
+        ref: decorativeConflict.name
+    };
+
+    return false;
+};
+
 exports.updateTable = async (req, res) => {
     try {
-        const { id } = req.params;
-        const updateData = req.body;
+        const { tableId, ...updates } = req.body;
 
-        const table = await Table.findById(id);
-        if (!table) {
-            return res.status(404).json({
+        if (!tableId) {
+            return res.status(400).json({
                 success: false,
-                message: "Table not found.",
+                message: "tableId is required"
             });
         }
 
-        if (updateData.tableNumber) {
-            const duplicate = await Table.findOne({
-                restaurantId: table.restaurantId,
-                tableNumber: updateData.tableNumber,
-                _id: { $ne: id },
+        const table = await Table.findById(tableId);
+        if (!table) {
+            return res.status(404).json({
+                success: false,
+                message: "Table not found"
             });
-            if (duplicate) {
-                return res.status(400).json({
+        }
+
+        const newRoom = updates.roomName || table.roomName;
+        const newPosition = updates.position || table.position;
+
+        const conflict = await checkPositionConflict({
+            restaurantId: table.restaurantId,
+            roomName: newRoom,
+            position: newPosition,
+            excludeId: table._id,
+            excludeType: "TABLE"
+        });
+
+        if (conflict) {
+            return res.status(409).json({
+                success: false,
+                message: `Position already occupied by ${conflict.type}`,
+                conflict
+            });
+        }
+
+        await Table.updateOne(
+            { _id: tableId },
+            { $set: updates }
+        );
+
+        return res.json({
+            success: true,
+            message: "Table updated successfully"
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
+};
+
+exports.updateDecorative = async (req, res) => {
+    try {
+        const { decorativeId, ...updates } = req.body;
+
+        if (!decorativeId) {
+            return res.status(400).json({
+                success: false,
+                message: "decorativeId is required"
+            });
+        }
+
+        const decorative = await RoomDecorative.findById(decorativeId);
+        if (!decorative) {
+            return res.status(404).json({
+                success: false,
+                message: "Decorative element not found"
+            });
+        }
+
+        const newRoom = updates.roomName || decorative.roomName;
+        const newPosition = updates.position || decorative.position;
+
+        const conflict = await checkPositionConflict({
+            restaurantId: decorative.restaurantId,
+            roomName: newRoom,
+            position: newPosition,
+            excludeId: decorative._id,
+            excludeType: "DECORATIVE"
+        });
+
+        if (conflict) {
+            return res.status(409).json({
+                success: false,
+                message: `Position already occupied by ${conflict.type}`,
+                conflict
+            });
+        }
+
+        await RoomDecorative.updateOne(
+            { _id: decorativeId },
+            { $set: updates }
+        );
+
+        return res.json({
+            success: true,
+            message: "Decorative updated successfully"
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
+};
+
+exports.bulkUpdateLayout = async (req, res) => {
+    try {
+        const { restaurantId, roomName, tables = [], decoratives = [] } = req.body;
+
+        if (!restaurantId || !roomName) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId and roomName are required"
+            });
+        }
+
+        /* ===============================
+           COLLECT ALL POSITIONS (IN-MEMORY)
+        =============================== */
+
+        const positionMap = new Map();
+
+        const addPosition = (x, y, ref, type) => {
+            const key = `${x}_${y}`;
+            if (positionMap.has(key)) {
+                throw {
+                    status: 409,
+                    message: "Position conflict in request payload",
+                    conflict: {
+                        first: positionMap.get(key),
+                        second: { type, ref }
+                    }
+                };
+            }
+            positionMap.set(key, { type, ref });
+        };
+
+        tables.forEach(t => {
+            if (t.position) {
+                addPosition(t.position.x, t.position.y, t._id, "TABLE");
+            }
+        });
+
+        decoratives.forEach(d => {
+            if (d.position) {
+                addPosition(d.position.x, d.position.y, d._id, "DECORATIVE");
+            }
+        });
+
+        /* ===============================
+           DB CONFLICT CHECK
+        =============================== */
+
+        for (const [key, value] of positionMap.entries()) {
+            const [x, y] = key.split("_").map(Number);
+
+            const tableConflict = await Table.findOne({
+                restaurantId,
+                roomName,
+                "position.x": x,
+                "position.y": y,
+                _id: { $ne: value.ref }
+            });
+
+            if (tableConflict) {
+                return res.status(409).json({
                     success: false,
-                    message: "Table number already exists for this restaurant.",
+                    message: "Position already occupied by table",
+                    conflict: {
+                        type: "TABLE",
+                        ref: tableConflict.tableNumber
+                    }
+                });
+            }
+
+            const decorativeConflict = await RoomDecorative.findOne({
+                restaurantId,
+                roomName,
+                "position.x": x,
+                "position.y": y,
+                _id: { $ne: value.ref }
+            });
+
+            if (decorativeConflict) {
+                return res.status(409).json({
+                    success: false,
+                    message: "Position already occupied by decorative",
+                    conflict: {
+                        type: "DECORATIVE",
+                        ref: decorativeConflict.name
+                    }
                 });
             }
         }
 
-        const updatedTable = await Table.findByIdAndUpdate(id, updateData, {
-            new: true,
-            runValidators: true,
-        });
+        /* ===============================
+           BULK UPDATE
+        =============================== */
 
-        return res.status(200).json({
+        const bulkTableOps = tables.map(t => ({
+            updateOne: {
+                filter: { _id: t._id },
+                update: { $set: t }
+            }
+        }));
+
+        const bulkDecorativeOps = decoratives.map(d => ({
+            updateOne: {
+                filter: { _id: d._id },
+                update: { $set: d }
+            }
+        }));
+
+        if (bulkTableOps.length) {
+            await Table.bulkWrite(bulkTableOps);
+        }
+
+        if (bulkDecorativeOps.length) {
+            await RoomDecorative.bulkWrite(bulkDecorativeOps);
+        }
+
+        return res.json({
             success: true,
-            message: "Table updated successfully.",
-            data: updatedTable,
+            message: "Floor layout updated successfully",
+            stats: {
+                tablesUpdated: tables.length,
+                decorativesUpdated: decoratives.length
+            }
         });
 
     } catch (error) {
-        console.error("Error updating table:", error);
-        res.status(500).json({
+        console.error(error);
+
+        return res.status(error.status || 500).json({
             success: false,
-            message: "Error updating table.",
-            error: error.message,
+            message: error.message || "Server error",
+            conflict: error.conflict || null
         });
     }
 };
 
 exports.deleteTable = async (req, res) => {
     try {
-        const { id } = req.params;
-        const deleted = await Table.findByIdAndDelete(id);
+        const { tableId } = req.body;
 
-        if (!deleted) {
-            return res.status(404).json({
+        if (!tableId) {
+            return res.status(400).json({
                 success: false,
-                message: 'Table not found.'
+                message: "tableId is required"
             });
         }
 
+        if (!mongoose.Types.ObjectId.isValid(tableId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid tableId"
+            });
+        }
+
+        const table = await Table.findById(tableId);
+        if (!table) {
+            return res.status(404).json({
+                success: false,
+                message: "Table not found"
+            });
+        }
+
+        await Table.findByIdAndDelete(tableId);
+
         return res.status(200).json({
             success: true,
-            message: 'Table deleted successfully.'
+            message: "Table deleted successfully"
         });
 
     } catch (error) {
-        console.error('Error deleting table:', error);
-        res.status(500).json({
+        console.error("Delete table error:", error);
+        return res.status(500).json({
             success: false,
-            message: 'Error deleting table.',
+            message: "Error deleting table",
             error: error.message
         });
     }
 };
+
+exports.deleteDecorative = async (req, res) => {
+    try {
+        const { decorativeId } = req.body;
+
+        if (!decorativeId) {
+            return res.status(400).json({
+                success: false,
+                message: "decorativeId is required"
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(decorativeId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid decorativeId"
+            });
+        }
+
+        const decorative = await RoomDecorative.findById(decorativeId);
+        if (!decorative) {
+            return res.status(404).json({
+                success: false,
+                message: "Decorative element not found"
+            });
+        }
+
+        await RoomDecorative.findByIdAndDelete(decorativeId);
+
+        return res.status(200).json({
+            success: true,
+            message: "Decorative element deleted successfully"
+        });
+
+    } catch (error) {
+        console.error("Delete decorative error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error deleting decorative element",
+            error: error.message
+        });
+    }
+};
+
+exports.deleteRoom = async (req, res) => {
+    try {
+        const { restaurantId, roomName } = req.body;
+
+        if (!restaurantId || !roomName) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId and roomName are required"
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid restaurantId"
+            });
+        }
+
+        // Delete all tables of the room
+        const tableResult = await Table.deleteMany({
+            restaurantId,
+            roomName
+        });
+
+        // Delete all decoratives of the room
+        const decorativeResult = await RoomDecorative.deleteMany({
+            restaurantId,
+            roomName
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Room deleted successfully",
+            deletedTables: tableResult.deletedCount,
+            deletedDecoratives: decorativeResult.deletedCount
+        });
+
+    } catch (error) {
+        console.error("Delete room error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error deleting room",
+            error: error.message
+        });
+    }
+};
+
 
 exports.getAvailableTables = async (req, res) => {
     try {

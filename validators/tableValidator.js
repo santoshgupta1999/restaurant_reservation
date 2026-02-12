@@ -6,9 +6,7 @@ exports.tableValidator = [
         .isMongoId().withMessage("Invalid restaurant ID"),
 
     body("roomName")
-        .notEmpty().withMessage("Room name is required")
-        .isIn(["Main Dining", "First Floor", "Bar", "Outdoor", "Terrace"])
-        .withMessage("Invalid room name"),
+        .notEmpty().withMessage("Room name is required"),
 
     body("tableNumber")
         .notEmpty().withMessage("Table number is required")
