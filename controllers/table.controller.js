@@ -3,7 +3,10 @@ const Reservation = require('../models/reservation.model');
 const Block = require('../models/block.model');
 const Shift = require('../models/shift.model');
 const RoomDecorative = require('../models/roomDecorative.model');
+const Guest = require("../models/guest.model");
+const sendMail = require("../utils/mailer");
 const mongoose = require('mongoose');
+const Room = require('../models/room.model');
 
 // exports.createTable = async (req, res) => {
 //     try {
@@ -166,205 +169,174 @@ exports.createTable = async (req, res) => {
             });
         }
 
-        let tablesToInsert = [];
-        let decorativesToInsert = [];
         let skipped = [];
 
-        const tableNumberMap = new Map();
-        const positionMap = new Map(); // table + decorative common
-
-        /* ---------------- PAYLOAD VALIDATION ---------------- */
         for (const room of rooms) {
+
             if (!room.roomName) continue;
 
-            /* ---------- TABLES ---------- */
+            let existingRoom;
+
+            /* ===================================================
+               ROOM CREATE / UPDATE (NO DUPLICATE CREATION)
+            ==================================================== */
+
+            if (room.roomId) {
+                //UPDATE EXISTING ROOM
+                existingRoom = await Room.findOne({
+                    _id: room.roomId,
+                    restaurantId
+                });
+
+                if (!existingRoom) {
+                    skipped.push({
+                        roomName: room.roomName,
+                        type: "ROOM",
+                        reason: "Room not found"
+                    });
+                    continue;
+                }
+
+                // Rename if changed
+                if (existingRoom.name !== room.roomName) {
+                    existingRoom.name = room.roomName;
+                    await existingRoom.save();
+                }
+
+            } else {
+                // CREATE NEW ROOM ONLY IF NOT EXISTS
+
+                existingRoom = await Room.findOne({
+                    restaurantId,
+                    name: room.roomName
+                });
+
+                if (!existingRoom) {
+                    existingRoom = await Room.create({
+                        restaurantId,
+                        name: room.roomName
+                    });
+                }
+            }
+
+            const roomId = existingRoom._id;
+
+            /* ===================================================
+             PROCESS TABLES (UPSERT SAFE)
+            ==================================================== */
+
             if (Array.isArray(room.tables)) {
+
                 for (const t of room.tables) {
+
                     if (!t.tableNumber || !t.position) continue;
 
-                    const tableNumber = String(t.tableNumber).trim().toUpperCase();
-                    const numKey = `${restaurantId}_${room.roomName}_${tableNumber}`;
-                    const posKey = `${restaurantId}_${room.roomName}_${t.position.x}_${t.position.y}`;
+                    const tableNumber = String(t.tableNumber)
+                        .trim()
+                        .toUpperCase();
 
-                    if (tableNumberMap.has(numKey)) {
-                        skipped.push({
-                            roomName: room.roomName,
-                            ref: tableNumber,
-                            type: "TABLE",
-                            reason: "Duplicate tableNumber in request"
-                        });
-                        continue;
+                    try {
+
+                        await Table.updateOne(
+                            {
+                                restaurantId,
+                                roomId,
+                                tableNumber
+                            },
+                            {
+                                $set: {
+                                    restaurantId,
+                                    roomId,
+                                    tableNumber,
+                                    displayName: t.displayName || null,
+                                    capacity: t.capacity || 2,
+                                    min: t.min || 1,
+                                    max: t.max || t.capacity || 6,
+                                    width: t.width || 0,
+                                    length: t.length || 0,
+                                    channel: t.channel || "Online & FOH",
+                                    shape: t.shape || "Square",
+                                    status: t.status || "Available",
+                                    position: t.position,
+                                    rotation: t.rotation || 0,
+                                    isActive: true
+                                }
+                            },
+                            { upsert: true }
+                        );
+
+                    } catch (err) {
+
+                        if (err.code === 11000) {
+                            skipped.push({
+                                roomName: room.roomName,
+                                ref: tableNumber,
+                                type: "TABLE",
+                                reason: "Duplicate position or tableNumber"
+                            });
+                            continue;
+                        }
+
+                        throw err;
                     }
-
-                    if (positionMap.has(posKey)) {
-                        skipped.push({
-                            roomName: room.roomName,
-                            ref: tableNumber,
-                            type: "TABLE",
-                            reason: "Duplicate position in request"
-                        });
-                        continue;
-                    }
-
-                    tableNumberMap.set(numKey, true);
-                    positionMap.set(posKey, true);
-
-                    tablesToInsert.push({
-                        restaurantId,
-                        roomName: room.roomName,
-                        tableNumber,
-                        displayName: t.displayName || null,
-                        capacity: t.capacity || 2,
-                        min: t.min || 1,
-                        max: t.max || t.capacity || 6,
-                        width: t.width || 0,
-                        length: t.length || 0,
-                        channel: t.channel || "Online & FOH",
-                        shape: t.shape || "Square",
-                        status: "Available",
-                        position: t.position,
-                        rotation: t.rotation || 0
-                    });
                 }
             }
 
-            /* ---------- DECORATIVES ---------- */
+            /* ===================================================
+                PROCESS DECORATIVES (UPSERT SAFE)
+            ==================================================== */
+
             if (Array.isArray(room.decoratives)) {
+
                 for (const d of room.decoratives) {
+
                     if (!d.name || !d.position) continue;
 
-                    const posKey = `${restaurantId}_${room.roomName}_${d.position.x}_${d.position.y}`;
+                    try {
 
-                    if (positionMap.has(posKey)) {
-                        skipped.push({
-                            roomName: room.roomName,
-                            ref: d.name,
-                            type: "DECORATIVE",
-                            reason: "Position already used (table/decorative)"
-                        });
-                        continue;
+                        await RoomDecorative.updateOne(
+                            {
+                                restaurantId,
+                                roomId,
+                                name: d.name
+                            },
+                            {
+                                $set: {
+                                    restaurantId,
+                                    roomId,
+                                    name: d.name,
+                                    width: d.width || 0,
+                                    length: d.length || 0,
+                                    position: d.position,
+                                    rotation: d.rotation || 0,
+                                    isActive: true
+                                }
+                            },
+                            { upsert: true }
+                        );
+
+                    } catch (err) {
+
+                        if (err.code === 11000) {
+                            skipped.push({
+                                roomName: room.roomName,
+                                ref: d.name,
+                                type: "DECORATIVE",
+                                reason: "Duplicate position"
+                            });
+                            continue;
+                        }
+
+                        throw err;
                     }
-
-                    positionMap.set(posKey, true);
-
-                    decorativesToInsert.push({
-                        restaurantId,
-                        roomName: room.roomName,
-                        name: d.name,
-                        width: d.width || 0,
-                        length: d.length || 0,
-                        position: d.position,
-                        rotation: d.rotation || 0,
-                        isActive: true
-                    });
                 }
             }
         }
 
-        /* ---------------- DB VALIDATION ---------------- */
-
-        for (const t of tablesToInsert) {
-
-            const existingTable = await Table.findOne({
-                restaurantId,
-                roomName: t.roomName,
-                tableNumber: t.tableNumber
-            });
-
-            // Check if some OTHER table already occupies this position
-            const positionConflict = await Table.findOne({
-                restaurantId,
-                roomName: t.roomName,
-                "position.x": t.position.x,
-                "position.y": t.position.y,
-                tableNumber: { $ne: t.tableNumber } // exclude itself
-            });
-
-            // Check decorative conflict
-            const decorativeConflict = await RoomDecorative.findOne({
-                restaurantId,
-                roomName: t.roomName,
-                "position.x": t.position.x,
-                "position.y": t.position.y
-            });
-
-            if (positionConflict || decorativeConflict) {
-                skipped.push({
-                    roomName: t.roomName,
-                    ref: t.tableNumber,
-                    type: "TABLE",
-                    reason: "Position already occupied"
-                });
-                continue;
-            }
-
-            if (existingTable) {
-                //UPDATE
-                await Table.updateOne(
-                    { _id: existingTable._id },
-                    { $set: t }
-                );
-            } else {
-                //CREATE
-                await Table.create(t);
-            }
-        }
-
-        for (const d of decorativesToInsert) {
-
-            const existingDecorative = await RoomDecorative.findOne({
-                restaurantId,
-                roomName: d.roomName,
-                name: d.name
-            });
-
-            // 🔎 Position conflict with OTHER decorative
-            const positionConflict = await RoomDecorative.findOne({
-                restaurantId,
-                roomName: d.roomName,
-                "position.x": d.position.x,
-                "position.y": d.position.y,
-                name: { $ne: d.name } // exclude itself
-            });
-
-            // 🔎 Conflict with table
-            const tableConflict = await Table.findOne({
-                restaurantId,
-                roomName: d.roomName,
-                "position.x": d.position.x,
-                "position.y": d.position.y
-            });
-
-            if (positionConflict || tableConflict) {
-                skipped.push({
-                    roomName: d.roomName,
-                    ref: d.name,
-                    type: "DECORATIVE",
-                    reason: "Position already occupied"
-                });
-                continue;
-            }
-
-            if (existingDecorative) {
-                // UPDATE
-                await RoomDecorative.updateOne(
-                    { _id: existingDecorative._id },
-                    { $set: d }
-                );
-            } else {
-                // CREATE
-                await RoomDecorative.create(d);
-            }
-        }
-
-        return res.status(201).json({
+        return res.status(200).json({
             success: true,
-            message: "Room layout published successfully",
-            stats: {
-                tablesInserted: tablesToInsert.length,
-                decorativesInserted: decorativesToInsert.length,
-                skipped: skipped.length
-            },
+            message: "Room layout saved successfully",
+            skippedCount: skipped.length,
             skipped
         });
 
@@ -396,11 +368,12 @@ exports.getAllTables = async (req, res) => {
         }
 
         /* ===============================
-           FETCH TABLES
+           FETCH TABLES (Populate Room)
         =============================== */
         const tablesRaw = await Table.find({ restaurantId })
+            .populate("roomId", "name")   // populate room name
             .populate("joinedWith", "tableNumber")
-            .sort({ roomName: 1, tableNumber: 1 });
+            .sort({ roomId: 1, tableNumber: 1 });
 
         /* ===============================
            FETCH DECORATIVES
@@ -408,27 +381,39 @@ exports.getAllTables = async (req, res) => {
         const decorativesRaw = await RoomDecorative.find({
             restaurantId,
             isActive: true
-        }).sort({ roomName: 1 });
+        })
+            .populate("roomId", "name")
+            .sort({ roomId: 1 });
 
         /* ===============================
-           DATE FORMATTER
+           FORMAT FUNCTION
         =============================== */
-        const formatDates = (doc) => {
+        const formatDoc = (doc) => {
             const obj = doc.toObject();
-            if (obj.createdAt) obj.createdAt = obj.createdAt.toISOString().split("T")[0];
-            if (obj.updatedAt) obj.updatedAt = obj.updatedAt.toISOString().split("T")[0];
+
+            // rename roomId.name → roomName
+            if (obj.roomId) {
+                obj.roomName = obj.roomId.name;
+                obj.roomId;
+            }
+
+            if (obj.createdAt)
+                obj.createdAt = obj.createdAt.toISOString().split("T")[0];
+
+            if (obj.updatedAt)
+                obj.updatedAt = obj.updatedAt.toISOString().split("T")[0];
+
             return obj;
         };
 
-        const tables = tablesRaw.map(formatDates);
-        const decoratives = decorativesRaw.map(formatDates);
+        const tables = tablesRaw.map(formatDoc);
+        const decoratives = decorativesRaw.map(formatDoc);
 
         /* ===============================
-           GROUP BY ROOM
+           GROUP BY ROOM NAME
         =============================== */
         const roomMap = {};
 
-        // tables group
         for (const table of tables) {
             if (!roomMap[table.roomName]) {
                 roomMap[table.roomName] = {
@@ -439,7 +424,6 @@ exports.getAllTables = async (req, res) => {
             roomMap[table.roomName].tables.push(table);
         }
 
-        // decoratives group
         for (const decor of decoratives) {
             if (!roomMap[decor.roomName]) {
                 roomMap[decor.roomName] = {
@@ -877,32 +861,177 @@ exports.deleteDecorative = async (req, res) => {
 
 exports.deleteRoom = async (req, res) => {
     try {
-        const { restaurantId, roomName } = req.body;
+        const { restaurantId, roomId, action } = req.body;
 
-        if (!restaurantId || !roomName) {
+        /* ===============================
+           VALIDATION
+        =============================== */
+
+        if (!restaurantId || !roomId) {
             return res.status(400).json({
                 success: false,
-                message: "restaurantId and roomName are required"
+                message: "restaurantId and roomId are required"
             });
         }
 
-        if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+        if (!mongoose.Types.ObjectId.isValid(restaurantId) ||
+            !mongoose.Types.ObjectId.isValid(roomId)) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid restaurantId"
+                message: "Invalid restaurantId or roomId"
             });
         }
 
-        // Delete all tables of the room
-        const tableResult = await Table.deleteMany({
+        /* ===============================
+           GET ALL TABLES OF ROOM
+        =============================== */
+
+        const tables = await Table.find({
             restaurantId,
-            roomName
+            roomId
         });
 
-        // Delete all decoratives of the room
+        if (!tables.length) {
+            return res.status(404).json({
+                success: false,
+                message: "No tables found in this room"
+            });
+        }
+
+        const tableIds = tables.map(t => t._id);
+
+        /* ===============================
+           CHECK FUTURE RESERVATIONS
+        =============================== */
+
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
+        const futureReservations = await Reservation.find({
+            restaurantId,
+            tableId: { $in: tableIds },
+            date: { $gte: todayStart },
+            status: { $in: ["Pending", "Confirmed", "Seated"] }
+        });
+
+        /* ===============================
+           IF FUTURE BOOKINGS EXIST
+        =============================== */
+
+        if (futureReservations.length > 0) {
+
+            if (!action) {
+                return res.status(409).json({
+                    success: false,
+                    type: "FUTURE_RESERVATIONS_EXIST",
+                    message: "Room has future reservations",
+                    totalFutureReservations: futureReservations.length,
+                    options: [
+                        "CANCEL_BOOKINGS",
+                        "MARK_AS_LEGACY"
+                    ]
+                });
+            }
+
+            /* OPTION 1: CANCEL BOOKINGS */
+            if (action === "CANCEL_BOOKINGS") {
+
+                await Reservation.updateMany(
+                    { _id: { $in: futureReservations.map(r => r._id) } },
+                    { $set: { status: "Cancelled" } }
+                );
+
+                // Fetch related guests & tables
+                const guestIds = futureReservations.map(r => r.guestId);
+                const reservationTableIds = futureReservations.map(r => r.tableId);
+
+                const guests = await Guest.find({
+                    _id: { $in: guestIds },
+                    isActive: true
+                });
+
+                const reservationTables = await Table.find({
+                    _id: { $in: reservationTableIds }
+                });
+
+                const guestMap = {};
+                guests.forEach(g => {
+                    guestMap[g._id.toString()] = g;
+                });
+
+                const tableMap = {};
+                reservationTables.forEach(t => {
+                    tableMap[t._id.toString()] = t;
+                });
+
+                await Promise.all(
+                    futureReservations.map(async (reservation) => {
+
+                        const guest = guestMap[reservation.guestId?.toString()];
+                        const table = tableMap[reservation.tableId?.toString()];
+
+                        if (!guest?.email) return;
+
+                        const fullName =
+                            `${guest.firstName || ""} ${guest.lastName || ""}`.trim();
+
+                        const tableNumber = table?.tableNumber || "N/A";
+
+                        const subject = "Reservation Cancelled";
+
+                        const message = `
+Dear ${fullName || "Guest"},
+
+Your reservation has been cancelled because the room is no longer available.
+
+Reservation Details:
+Date: ${reservation.date.toDateString()}
+Time: ${reservation.time}
+Party Size: ${reservation.partySize}
+Table No: ${tableNumber}
+
+We apologize for the inconvenience.
+
+Best Regards,
+Restaurant Team
+                        `;
+
+                        try {
+                            await sendMail(guest.email, subject, message);
+                        } catch (err) {
+                            console.error("Email failed:", guest.email);
+                        }
+                    })
+                );
+            }
+
+            /* OPTION 2: MARK AS LEGACY */
+            if (action === "MARK_AS_LEGACY") {
+
+                await Table.updateMany(
+                    { restaurantId, roomId },
+                    { $set: { isLegacy: true } }
+                );
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Room marked as legacy. Future reservations preserved."
+                });
+            }
+        }
+
+        /* ===============================
+           SAFE DELETE
+        =============================== */
+
+        const tableResult = await Table.deleteMany({
+            restaurantId,
+            roomId
+        });
+
         const decorativeResult = await RoomDecorative.deleteMany({
             restaurantId,
-            roomName
+            roomId
         });
 
         return res.status(200).json({
@@ -921,7 +1050,6 @@ exports.deleteRoom = async (req, res) => {
         });
     }
 };
-
 
 exports.getAvailableTables = async (req, res) => {
     try {

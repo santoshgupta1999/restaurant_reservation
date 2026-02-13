@@ -8,9 +8,10 @@ const tableSchema = new mongoose.Schema(
             required: true,
         },
 
-        roomName: {
-            type: String,
-            required: true,
+        roomId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Room",
+            required: true
         },
 
         tableNumber: {
@@ -103,19 +104,22 @@ const tableSchema = new mongoose.Schema(
             type: String,
             default: null
         },
+
+        isLegacy: {
+            type: Boolean,
+            default: false
+        },
     },
     { timestamps: true }
 );
 
-// Table schema me
 tableSchema.index(
-    { restaurantId: 1, roomName: 1, tableNumber: 1 },
+    { restaurantId: 1, roomId: 1, tableNumber: 1 },
     { unique: true }
 );
 
-// same position block
 tableSchema.index(
-    { restaurantId: 1, roomName: 1, "position.x": 1, "position.y": 1 },
+    { restaurantId: 1, roomId: 1, "position.x": 1, "position.y": 1 },
     { unique: true }
 );
 

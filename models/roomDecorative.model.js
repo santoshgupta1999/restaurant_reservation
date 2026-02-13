@@ -8,8 +8,9 @@ const roomDecorativeSchema = new mongoose.Schema(
             required: true
         },
 
-        roomName: {
-            type: String,
+        roomId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Room",
             required: true
         },
 
@@ -40,12 +41,12 @@ const roomDecorativeSchema = new mongoose.Schema(
 );
 
 roomDecorativeSchema.index(
-    { restaurantId: 1, roomName: 1, "position.x": 1, "position.y": 1 },
+    { restaurantId: 1, roomId: 1, "position.x": 1, "position.y": 1 },
     { unique: true }
 );
 
 roomDecorativeSchema.index(
-    { restaurantId: 1, roomName: 1, name: 1 },
+    { restaurantId: 1, roomId: 1, name: 1 },
     { unique: true }
 );
 
