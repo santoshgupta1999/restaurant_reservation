@@ -18,10 +18,10 @@ const sendEmail = require('../utils/mailer'); // <-- optional Email helper
 exports.createReservation = async (req, res) => {
     try {
         const {
+            reservationId,
             restaurantId,
             tableId,
 
-            // Guest fields
             firstName,
             lastName,
             guestEmail,
@@ -29,7 +29,6 @@ exports.createReservation = async (req, res) => {
             gender,
             dob,
 
-            // Reservation fields
             date,
             time,
             partySize,
@@ -48,9 +47,18 @@ exports.createReservation = async (req, res) => {
         }
 
         const reservationDate = new Date(date);
-        // const weekdayName = reservationDate.toLocaleDateString("en-US", {
-        //     weekday: "long"
-        // });
+
+        let existingReservation = null;
+
+        if (reservationId) {
+            existingReservation = await Reservation.findById(reservationId);
+            if (!existingReservation) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Reservation not found."
+                });
+            }
+        }
 
         const shortDay = reservationDate.toLocaleDateString("en-US", {
             weekday: "short"
@@ -68,18 +76,11 @@ exports.createReservation = async (req, res) => {
 
         const weekdayName = map[shortDay];
 
-        /* ---------------------------------------------------
-           🔹 SHIFT LOGIC (UNCHANGED)
-        --------------------------------------------------- */
-
         const allShifts = await Shift.find({
             restaurantId,
             isActive: true,
             $or: [
-                {
-                    type: "Recurring",
-                    daysActive: { $in: [weekdayName] }
-                },
+                { type: "Recurring", daysActive: { $in: [weekdayName] } },
                 {
                     type: "Special",
                     startDate: { $lte: reservationDate },
@@ -87,6 +88,7 @@ exports.createReservation = async (req, res) => {
                 }
             ]
         });
+
         if (!allShifts.length) {
             return res.status(400).json({
                 success: false,
@@ -109,81 +111,11 @@ exports.createReservation = async (req, res) => {
         });
 
         if (!shift) {
-            let nearestShift = null;
-            let minDiff = Infinity;
-
-            allShifts.forEach(s => {
-                const start = convertToMinutes(s.startTime);
-                const diff = Math.abs(reservationMinutes - start);
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    nearestShift = s;
-                }
-            });
-
-            if (minDiff > 60) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Reservation time is outside all shift timings."
-                });
-            }
-
-            shift = nearestShift;
-        }
-
-        /* ---------------------------------------------------
-   🔹 BLOCK AVAILABILITY CHECK (NEW)
---------------------------------------------------- */
-
-        const conflictingBlock = await Block.findOne({
-            restaurantId,
-            status: "Active",
-            isExpired: false,
-            startDate: { $lte: reservationDate },
-            endDate: { $gte: reservationDate },
-            $or: [
-                { isFullRestaurantBlock: true },
-                tableId ? { tableIds: tableId } : {},
-                shift ? { shiftIds: shift._id } : {}
-            ]
-        });
-
-        if (conflictingBlock) {
             return res.status(400).json({
                 success: false,
-                message: `This table is not available from ${conflictingBlock.startDate.toDateString()} to ${conflictingBlock.endDate.toDateString()}. Please choose another table.`,
-                block: {
-                    reason: conflictingBlock.reason,
-                    startDate: conflictingBlock.startDate,
-                    endDate: conflictingBlock.endDate
-                }
+                message: "Reservation time is outside all shift timings."
             });
         }
-
-        /* ---------------------------------------------------
-           🔹 TABLE AVAILABILITY CHECK
-        --------------------------------------------------- */
-
-        if (tableId) {
-            const existing = await Reservation.findOne({
-                restaurantId,
-                tableId,
-                date: reservationDate,
-                time,
-                status: { $nin: ["Cancelled", "No-show"] }
-            });
-
-            if (existing) {
-                return res.status(400).json({
-                    success: false,
-                    message: "This table is already reserved for the selected date & time."
-                });
-            }
-        }
-
-        /* ---------------------------------------------------
-           🔹 CREATE / UPDATE GUEST (🔥 MAIN ADDITION)
-        --------------------------------------------------- */
 
         let guest = null;
 
@@ -199,7 +131,6 @@ exports.createReservation = async (req, res) => {
         }
 
         if (guest) {
-            // update existing guest
             guest.firstName = firstName || guest.firstName;
             guest.lastName = lastName || guest.lastName;
             guest.phone = guestPhone || guest.phone;
@@ -207,13 +138,8 @@ exports.createReservation = async (req, res) => {
             guest.gender = gender || guest.gender;
             guest.dob = dob || guest.dob;
 
-            if (tags?.length) {
-                guest.tags = [...new Set([...guest.tags, ...tags])];
-            }
-
             await guest.save();
         } else {
-            // create new guest
             guest = await Guest.create({
                 restaurantId,
                 firstName,
@@ -227,45 +153,54 @@ exports.createReservation = async (req, res) => {
             });
         }
 
-        /* ---------------------------------------------------
-           🔹 CREATE RESERVATION
-        --------------------------------------------------- */
+        let reservation;
 
-        const newReservation = await Reservation.create({
-            restaurantId,
-            guestId: guest._id,
-            tableId,
-            shiftId: shift._id,
-            date: reservationDate,
-            time,
-            partySize,
-            source,
-            status,
-            seating,
-            tags,
-            notes
-        });
+        if (existingReservation) {
+            // UPDATE
+            existingReservation.tableId = tableId || existingReservation.tableId;
+            existingReservation.shiftId = shift._id;
+            existingReservation.date = reservationDate;
+            existingReservation.time = time;
+            existingReservation.partySize = partySize;
+            existingReservation.source = source;
+            existingReservation.status = status;
+            existingReservation.seating = seating;
+            existingReservation.tags = tags;
+            existingReservation.notes = notes;
 
-        // 🔹 Update upcoming visit in Guest
-        await Guest.findByIdAndUpdate(guest._id, {
-            upcomingVisitAt: reservationDate
-        });
+            reservation = await existingReservation.save();
 
-        return res.status(201).json({
+        } else {
+            // CREATE
+            reservation = await Reservation.create({
+                restaurantId,
+                guestId: guest._id,
+                tableId,
+                shiftId: shift._id,
+                date: reservationDate,
+                time,
+                partySize,
+                source,
+                status,
+                seating,
+                tags,
+                notes
+            });
+        }
+
+        return res.status(200).json({
             success: true,
-            message: "Reservation created successfully.",
-            assignedShift: shift.name,
-            data: {
-                reservation: newReservation,
-                guest
-            }
+            message: reservationId
+                ? "Reservation updated successfully."
+                : "Reservation created successfully.",
+            data: reservation
         });
 
     } catch (error) {
-        console.error("Error creating reservation:", error);
+        console.error("Error saving reservation:", error);
         return res.status(500).json({
             success: false,
-            message: "Error creating reservation.",
+            message: "Error saving reservation.",
             error: error.message
         });
     }
@@ -277,9 +212,13 @@ exports.getReservations = async (req, res) => {
             restaurantId,
             date,
             status,
-            source
+            source,
+            roomId   // NEW FILTER
         } = req.body;
 
+        /* ===============================
+           VALIDATE RESTAURANT
+        =============================== */
         if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) {
             return res.status(400).json({
                 success: false,
@@ -314,6 +253,29 @@ exports.getReservations = async (req, res) => {
             query.source = source;
         }
 
+        /* ---------------- ROOM FILTER ---------------- */
+        if (roomId) {
+            if (!mongoose.Types.ObjectId.isValid(roomId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid roomId"
+                });
+            }
+
+            // Get tables of that room
+            const tables = await Table.find({
+                restaurantId,
+                roomId
+            }).select("_id");
+
+            const tableIds = tables.map(t => t._id);
+
+            query.tableId = { $in: tableIds };
+        }
+
+        /* ===============================
+           FETCH RESERVATIONS
+        =============================== */
         const reservationsRaw = await Reservation.find(query)
             .populate({
                 path: "guestId",
@@ -334,7 +296,11 @@ exports.getReservations = async (req, res) => {
             })
             .populate({
                 path: "tableId",
-                select: "tableNumber roomName capacity"
+                select: "tableNumber roomId capacity",
+                populate: {
+                    path: "roomId",
+                    select: "name"
+                }
             })
             .populate({
                 path: "shiftId",
@@ -343,7 +309,7 @@ exports.getReservations = async (req, res) => {
             .sort({ date: 1, time: 1 });
 
         /* ===============================
-           DATE TRIM HELPER
+           DATE FORMAT HELPER
         =============================== */
         const trimDate = (val) =>
             val ? new Date(val).toISOString().split("T")[0] : null;
@@ -361,6 +327,12 @@ exports.getReservations = async (req, res) => {
                 obj.guestId.dob = trimDate(obj.guestId.dob);
                 obj.guestId.lastVisitAt = trimDate(obj.guestId.lastVisitAt);
                 obj.guestId.upcomingVisitAt = trimDate(obj.guestId.upcomingVisitAt);
+            }
+
+            /* ✅ Convert roomId.name → roomName */
+            if (obj.tableId?.roomId) {
+                obj.tableId.roomName = obj.tableId.roomId.name;
+                delete obj.tableId.roomId;
             }
 
             return obj;

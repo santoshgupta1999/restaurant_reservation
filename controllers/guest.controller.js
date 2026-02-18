@@ -106,8 +106,8 @@ exports.getGuests = async (req, res) => {
             restaurantId,
             isActive,
             tags,
-            sortBy = "firstName",
-            order = "asc"
+            sortBy = "createdAt",
+            order = "desc"
         } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(restaurantId)) {

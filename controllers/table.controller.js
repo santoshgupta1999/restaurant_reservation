@@ -177,12 +177,7 @@ exports.createTable = async (req, res) => {
 
             let existingRoom;
 
-            /* ===================================================
-               ROOM CREATE / UPDATE (NO DUPLICATE CREATION)
-            ==================================================== */
-
             if (room.roomId) {
-                //UPDATE EXISTING ROOM
                 existingRoom = await Room.findOne({
                     _id: room.roomId,
                     restaurantId
@@ -204,8 +199,6 @@ exports.createTable = async (req, res) => {
                 }
 
             } else {
-                // CREATE NEW ROOM ONLY IF NOT EXISTS
-
                 existingRoom = await Room.findOne({
                     restaurantId,
                     name: room.roomName
@@ -220,10 +213,6 @@ exports.createTable = async (req, res) => {
             }
 
             const roomId = existingRoom._id;
-
-            /* ===================================================
-             PROCESS TABLES (UPSERT SAFE)
-            ==================================================== */
 
             if (Array.isArray(room.tables)) {
 
@@ -281,10 +270,6 @@ exports.createTable = async (req, res) => {
                     }
                 }
             }
-
-            /* ===================================================
-                PROCESS DECORATIVES (UPSERT SAFE)
-            ==================================================== */
 
             if (Array.isArray(room.decoratives)) {
 
@@ -367,17 +352,11 @@ exports.getAllTables = async (req, res) => {
             });
         }
 
-        /* ===============================
-           FETCH TABLES (Populate Room)
-        =============================== */
         const tablesRaw = await Table.find({ restaurantId })
-            .populate("roomId", "name")   // populate room name
+            .populate("roomId", "name")
             .populate("joinedWith", "tableNumber")
             .sort({ roomId: 1, tableNumber: 1 });
 
-        /* ===============================
-           FETCH DECORATIVES
-        =============================== */
         const decorativesRaw = await RoomDecorative.find({
             restaurantId,
             isActive: true
@@ -385,13 +364,9 @@ exports.getAllTables = async (req, res) => {
             .populate("roomId", "name")
             .sort({ roomId: 1 });
 
-        /* ===============================
-           FORMAT FUNCTION
-        =============================== */
         const formatDoc = (doc) => {
             const obj = doc.toObject();
 
-            // rename roomId.name → roomName
             if (obj.roomId) {
                 obj.roomName = obj.roomId.name;
                 obj.roomId;
@@ -409,9 +384,6 @@ exports.getAllTables = async (req, res) => {
         const tables = tablesRaw.map(formatDoc);
         const decoratives = decorativesRaw.map(formatDoc);
 
-        /* ===============================
-           GROUP BY ROOM NAME
-        =============================== */
         const roomMap = {};
 
         for (const table of tables) {
@@ -860,12 +832,11 @@ exports.deleteDecorative = async (req, res) => {
 };
 
 exports.deleteRoom = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
         const { restaurantId, roomId, action } = req.body;
-
-        /* ===============================
-           VALIDATION
-        =============================== */
 
         if (!restaurantId || !roomId) {
             return res.status(400).json({
@@ -874,35 +845,28 @@ exports.deleteRoom = async (req, res) => {
             });
         }
 
-        if (!mongoose.Types.ObjectId.isValid(restaurantId) ||
-            !mongoose.Types.ObjectId.isValid(roomId)) {
+        if (
+            !mongoose.Types.ObjectId.isValid(restaurantId) ||
+            !mongoose.Types.ObjectId.isValid(roomId)
+        ) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid restaurantId or roomId"
             });
         }
 
-        /* ===============================
-           GET ALL TABLES OF ROOM
-        =============================== */
-
-        const tables = await Table.find({
-            restaurantId,
-            roomId
-        });
-
-        if (!tables.length) {
-            return res.status(404).json({
+        const allowedActions = ["CANCEL_BOOKINGS", "MARK_AS_LEGACY"];
+        if (action && !allowedActions.includes(action)) {
+            return res.status(400).json({
                 success: false,
-                message: "No tables found in this room"
+                message: "Invalid action value"
             });
         }
 
-        const tableIds = tables.map(t => t._id);
-
-        /* ===============================
-           CHECK FUTURE RESERVATIONS
-        =============================== */
+        const tableIds = await Table
+            .find({ restaurantId, roomId })
+            .distinct("_id")
+            .session(session);
 
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
@@ -912,74 +876,109 @@ exports.deleteRoom = async (req, res) => {
             tableId: { $in: tableIds },
             date: { $gte: todayStart },
             status: { $in: ["Pending", "Confirmed", "Seated"] }
-        });
-
-        /* ===============================
-           IF FUTURE BOOKINGS EXIST
-        =============================== */
+        }).session(session);
 
         if (futureReservations.length > 0) {
 
             if (!action) {
+                await session.abortTransaction();
+                session.endSession();
+
                 return res.status(409).json({
                     success: false,
                     type: "FUTURE_RESERVATIONS_EXIST",
                     message: "Room has future reservations",
                     totalFutureReservations: futureReservations.length,
-                    options: [
-                        "CANCEL_BOOKINGS",
-                        "MARK_AS_LEGACY"
-                    ]
+                    options: allowedActions
                 });
             }
 
-            /* OPTION 1: CANCEL BOOKINGS */
+            /* OPTION 1: MARK AS LEGACY */
+            if (action === "MARK_AS_LEGACY") {
+
+                await Table.updateMany(
+                    { restaurantId, roomId },
+                    { $set: { isLegacy: true } },
+                    { session }
+                );
+
+                await session.commitTransaction();
+                session.endSession();
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Room marked as legacy. Future reservations preserved."
+                });
+            }
+
+            /* OPTION 2: CANCEL BOOKINGS */
             if (action === "CANCEL_BOOKINGS") {
 
                 await Reservation.updateMany(
                     { _id: { $in: futureReservations.map(r => r._id) } },
-                    { $set: { status: "Cancelled" } }
+                    { $set: { status: "Cancelled" } },
+                    { session }
                 );
+            }
+        }
 
-                // Fetch related guests & tables
-                const guestIds = futureReservations.map(r => r.guestId);
-                const reservationTableIds = futureReservations.map(r => r.tableId);
+        const tableResult = await Table.deleteMany(
+            { restaurantId, roomId },
+            { session }
+        );
 
-                const guests = await Guest.find({
-                    _id: { $in: guestIds },
-                    isActive: true
-                });
+        const decorativeResult = await RoomDecorative.deleteMany(
+            { restaurantId, roomId },
+            { session }
+        );
 
-                const reservationTables = await Table.find({
-                    _id: { $in: reservationTableIds }
-                });
+        await Room.deleteOne(
+            { _id: roomId, restaurantId },
+            { session }
+        );
 
-                const guestMap = {};
-                guests.forEach(g => {
-                    guestMap[g._id.toString()] = g;
-                });
+        await session.commitTransaction();
+        session.endSession();
 
-                const tableMap = {};
-                reservationTables.forEach(t => {
-                    tableMap[t._id.toString()] = t;
-                });
+        if (action === "CANCEL_BOOKINGS" && futureReservations.length > 0) {
 
-                await Promise.all(
-                    futureReservations.map(async (reservation) => {
+            const guestIds = futureReservations
+                .map(r => r.guestId)
+                .filter(Boolean);
 
-                        const guest = guestMap[reservation.guestId?.toString()];
-                        const table = tableMap[reservation.tableId?.toString()];
+            const reservationTableIds = futureReservations
+                .map(r => r.tableId)
+                .filter(Boolean);
 
-                        if (!guest?.email) return;
+            const [guests, reservationTables] = await Promise.all([
+                Guest.find({ _id: { $in: guestIds }, isActive: true }),
+                Table.find({ _id: { $in: reservationTableIds } })
+            ]);
 
-                        const fullName =
-                            `${guest.firstName || ""} ${guest.lastName || ""}`.trim();
+            const guestMap = {};
+            guests.forEach(g => {
+                guestMap[g._id.toString()] = g;
+            });
 
-                        const tableNumber = table?.tableNumber || "N/A";
+            const tableMap = {};
+            reservationTables.forEach(t => {
+                tableMap[t._id.toString()] = t;
+            });
 
-                        const subject = "Reservation Cancelled";
+            // Fire and forget (non-blocking)
+            futureReservations.forEach(async (reservation) => {
+                try {
+                    const guest = guestMap[reservation.guestId?.toString()];
+                    if (!guest?.email) return;
 
-                        const message = `
+                    const table = tableMap[reservation.tableId?.toString()];
+
+                    const fullName =
+                        `${guest.firstName || ""} ${guest.lastName || ""}`.trim();
+
+                    const subject = "Reservation Cancelled";
+
+                    const message = `
 Dear ${fullName || "Guest"},
 
 Your reservation has been cancelled because the room is no longer available.
@@ -988,51 +987,20 @@ Reservation Details:
 Date: ${reservation.date.toDateString()}
 Time: ${reservation.time}
 Party Size: ${reservation.partySize}
-Table No: ${tableNumber}
+Table No: ${table?.tableNumber || "N/A"}
 
 We apologize for the inconvenience.
 
 Best Regards,
 Restaurant Team
-                        `;
+                    `;
 
-                        try {
-                            await sendMail(guest.email, subject, message);
-                        } catch (err) {
-                            console.error("Email failed:", guest.email);
-                        }
-                    })
-                );
-            }
-
-            /* OPTION 2: MARK AS LEGACY */
-            if (action === "MARK_AS_LEGACY") {
-
-                await Table.updateMany(
-                    { restaurantId, roomId },
-                    { $set: { isLegacy: true } }
-                );
-
-                return res.status(200).json({
-                    success: true,
-                    message: "Room marked as legacy. Future reservations preserved."
-                });
-            }
+                    await sendMail(guest.email, subject, message);
+                } catch (err) {
+                    console.error("Email failed:", err.message);
+                }
+            });
         }
-
-        /* ===============================
-           SAFE DELETE
-        =============================== */
-
-        const tableResult = await Table.deleteMany({
-            restaurantId,
-            roomId
-        });
-
-        const decorativeResult = await RoomDecorative.deleteMany({
-            restaurantId,
-            roomId
-        });
 
         return res.status(200).json({
             success: true,
@@ -1042,7 +1010,11 @@ Restaurant Team
         });
 
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+
         console.error("Delete room error:", error);
+
         return res.status(500).json({
             success: false,
             message: "Error deleting room",
@@ -1138,6 +1110,9 @@ exports.mergeTables = async (req, res) => {
             });
         }
 
+        /* ===============================
+           FETCH TABLES
+        =============================== */
         const tables = await Table.find({ _id: { $in: tableIds } });
 
         if (tables.length !== tableIds.length) {
@@ -1147,26 +1122,53 @@ exports.mergeTables = async (req, res) => {
             });
         }
 
-        const alreadyJoined = tables.find(t => t.isJoined);
-        if (alreadyJoined) {
-            return res.status(400).json({
-                success: false,
-                message: `Table ${alreadyJoined.tableNumber} is already merged.`
-            });
-        }
-
+        /* ===============================
+           CHECK SAME RESTAURANT
+        =============================== */
         const restaurantId = tables[0].restaurantId.toString();
-        const allSameRestaurant = tables.every(
+        const sameRestaurant = tables.every(
             t => t.restaurantId.toString() === restaurantId
         );
 
-        if (!allSameRestaurant) {
+        if (!sameRestaurant) {
             return res.status(400).json({
                 success: false,
                 message: "All tables must belong to the same restaurant."
             });
         }
 
+        /* ===============================
+           CHECK SAME ROOM (IMPORTANT)
+        =============================== */
+        const roomId = tables[0].roomId?.toString();
+        const sameRoom = tables.every(
+            t => t.roomId?.toString() === roomId
+        );
+
+        if (!sameRoom) {
+            return res.status(400).json({
+                success: false,
+                message: "All tables must belong to the same room."
+            });
+        }
+
+        /* ===============================
+           CHECK IF ALREADY MERGED
+        =============================== */
+        const alreadyMerged = tables.find(
+            t => t.isJoined || (t.joinedWith && t.joinedWith.length > 0)
+        );
+
+        if (alreadyMerged) {
+            return res.status(400).json({
+                success: false,
+                message: `Table ${alreadyMerged.tableNumber} is already merged.`
+            });
+        }
+
+        /* ===============================
+           MERGE TABLES
+        =============================== */
         await Table.updateMany(
             { _id: { $in: tableIds } },
             {
@@ -1181,13 +1183,15 @@ exports.mergeTables = async (req, res) => {
             success: true,
             message: "Tables merged successfully.",
             data: {
+                restaurantId,
+                roomId,
                 mergedTableIds: tableIds
             }
         });
 
     } catch (error) {
         console.error("Error merging tables:", error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Error merging tables.",
             error: error.message
@@ -1478,6 +1482,7 @@ exports.updateTableStatus = async (req, res) => {
         const { status } = req.body;
 
         const allowedStatuses = ["Available", "Reserved", "Seated", "OutOfService"];
+
         if (!allowedStatuses.includes(status)) {
             return res.status(400).json({
                 success: false,
@@ -1485,6 +1490,7 @@ exports.updateTableStatus = async (req, res) => {
             });
         }
 
+        // Update Table Status
         const updatedTable = await Table.findByIdAndUpdate(
             id,
             { status },
@@ -1498,16 +1504,40 @@ exports.updateTableStatus = async (req, res) => {
             });
         }
 
+        let updatedReservation = null;
+
+        if (status === "Seated") {
+
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+
+            const todayEnd = new Date();
+            todayEnd.setHours(23, 59, 59, 999);
+
+            updatedReservation = await Reservation.findOneAndUpdate(
+                {
+                    tableId: id,
+                    date: { $gte: todayStart, $lte: todayEnd },
+                    status: { $in: ["Pending", "Confirmed"] }
+                },
+                { status: "Seated" },
+                { new: true }
+            );
+        }
+
         return res.status(200).json({
             success: true,
             message: `Table status updated successfully to ${status}.`,
             data: {
-                id: updatedTable._id,
-                tableNumber: updatedTable.tableNumber,
-                roomName: updatedTable.roomName,
-                capacity: updatedTable.capacity,
-                status: updatedTable.status,
-                restaurant: updatedTable.restaurantId
+                table: {
+                    id: updatedTable._id,
+                    tableNumber: updatedTable.tableNumber,
+                    roomName: updatedTable.roomName,
+                    capacity: updatedTable.capacity,
+                    status: updatedTable.status,
+                    restaurant: updatedTable.restaurantId
+                },
+                reservationUpdated: updatedReservation || null
             }
         });
 

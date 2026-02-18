@@ -70,6 +70,8 @@ router.get('/shift/active/today', restaurantController.getActiveShiftsForToday);
 router.get('/getShiftsCalendarView', restaurantController.getShiftsCalendarView);
 router.post("/updateShiftStatus/:id", restaurantController.updateShiftStatus);
 
+router.post("/getRestaurantSlots", restaurantController.getRestaurantSlots);
+
 // -------------------------------- Preference -------------------------
 
 router.post("/addPreference", seatingPreference.addSeatingPreference);
