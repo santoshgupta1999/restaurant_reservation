@@ -213,12 +213,9 @@ exports.getReservations = async (req, res) => {
             date,
             status,
             source,
-            roomId   // NEW FILTER
+            roomId
         } = req.body;
 
-        /* ===============================
-           VALIDATE RESTAURANT
-        =============================== */
         if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) {
             return res.status(400).json({
                 success: false,
@@ -273,9 +270,6 @@ exports.getReservations = async (req, res) => {
             query.tableId = { $in: tableIds };
         }
 
-        /* ===============================
-           FETCH RESERVATIONS
-        =============================== */
         const reservationsRaw = await Reservation.find(query)
             .populate({
                 path: "guestId",
@@ -308,9 +302,6 @@ exports.getReservations = async (req, res) => {
             })
             .sort({ date: 1, time: 1 });
 
-        /* ===============================
-           DATE FORMAT HELPER
-        =============================== */
         const trimDate = (val) =>
             val ? new Date(val).toISOString().split("T")[0] : null;
 
@@ -329,7 +320,7 @@ exports.getReservations = async (req, res) => {
                 obj.guestId.upcomingVisitAt = trimDate(obj.guestId.upcomingVisitAt);
             }
 
-            /* ✅ Convert roomId.name → roomName */
+            /* Convert roomId.name → roomName */
             if (obj.tableId?.roomId) {
                 obj.tableId.roomName = obj.tableId.roomId.name;
                 delete obj.tableId.roomId;

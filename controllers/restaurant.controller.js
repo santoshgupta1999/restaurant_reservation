@@ -1279,8 +1279,8 @@ exports.getRestaurantSlots = async (req, res) => {
                 }
 
                 shiftSlots.push({
-                    // startTime24: start.format("HH:mm"),
-                    startTime: start.format("hh:mm A"),
+                    startTime: start.format("HH:mm"),                 // 24H format
+                    // startTime: start.format("hh:mm A"),            // 12H format
                     // endTime: start.clone().add(duration, "minutes").format("hh:mm A")
                 });
 

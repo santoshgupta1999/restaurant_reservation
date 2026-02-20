@@ -29,12 +29,13 @@ router.post('/deleteRoom', tableController.deleteRoom);
 router.post('/updateRoomLayout', tableController.bulkUpdateLayout);
 
 router.post('/mergeTables', tableController.mergeTables);
-router.put('/unmergeTables/:tableId', tableController.unmergeTables);
-router.put('/unmergeSeatedTables', tableController.unmergeSeatedTables);
+router.post('/unmergeTables', tableController.unmergeTables);
 router.get('/getAllMergedTables', tableController.getAllMergedTables);
 
-router.put('/lockTable/:tableId', verifyToken, tableController.lockTable);
-router.put('/unlockTable/:tableId', tableController.unlockTable);
+router.post('/unassignTable', tableController.unassignTable);
+router.post('/changeTableAssignment', tableController.changeTableAssignment);
+
+router.post('/lockTable', verifyToken, tableController.lockTable);
 router.get('/getAllLockedTables', tableController.getAllLockedTables);
 router.post('/getAllBookingsDetails', tableController.getAllBookingsDetails);
 
