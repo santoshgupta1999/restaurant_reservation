@@ -13,13 +13,14 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-const sendMail = async (to, subject, text) => {
+const sendMail = async (to, subject, text, html = null) => {
     try {
         const info = await transporter.sendMail({
             from: `"Restaurant-Reservation" <${process.env.SMTP_USER}>`,
             to,
             subject,
             text,
+            html
         });
         return info;
     } catch (error) {

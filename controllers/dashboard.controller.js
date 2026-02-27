@@ -8,7 +8,7 @@ exports.getVenues = async (req, res) => {
 
         const baseQuery = { isDeleted: false };
 
-        // 📅 Dates
+        //  Dates
         const now = new Date();
         const last30Days = new Date(now);
         last30Days.setDate(now.getDate() - 30);
@@ -16,7 +16,10 @@ exports.getVenues = async (req, res) => {
         const prev30Days = new Date(now);
         prev30Days.setDate(now.getDate() - 60);
 
-        // ⚡ PARALLEL MAIN COUNTS
+        const next7 = new Date(now);
+        next7.setDate(now.getDate() + 7);
+
+        //  PARALLEL MAIN COUNTS
         const [
             totalVenues,
             activeVenues,
@@ -48,7 +51,7 @@ exports.getVenues = async (req, res) => {
             })
         ]);
 
-        // ⚡ TIER COUNTS PARALLEL
+        //  TIER COUNTS PARALLEL
         const venuesByTier = await Promise.all(
             tiers.map(async (t) => {
                 const count = await Restaurant.countDocuments({
@@ -60,13 +63,13 @@ exports.getVenues = async (req, res) => {
             })
         );
 
-        // 📈 TREND %
+        //  TREND %
         let trend = 0;
         if (newPrev30 > 0) {
             trend = ((newLast30 - newPrev30) / newPrev30) * 100;
         }
 
-        // 📈 TREND CALC
+        //  TREND CALC
         let trendPercent = 0;
         let trendType = "no-change"; // increase | decrease | no-change
         let difference = newLast30 - newPrev30;
@@ -83,6 +86,11 @@ exports.getVenues = async (req, res) => {
             else trendType = "no-change";
         }
 
+        const restaurants = await Restaurant.find({
+            status: "Trial",
+            trialEndDate: { $gte: now, $lte: next7 },
+            isDeleted: false
+        }).lean();
 
         return res.status(200).json({
             success: true,
@@ -102,7 +110,9 @@ exports.getVenues = async (req, res) => {
                     last30Days: newLast30,
                     trendPercent: Number(Math.abs(trendPercent).toFixed(1)),
                     trendType         // +5 ya -3
-                }
+                },
+
+                TrialEnd: restaurants.length
 
             }
         });
@@ -118,12 +128,13 @@ exports.getVenues = async (req, res) => {
 
 exports.getBooking24hTrend = async (req, res) => {
     try {
+        const now = new Date();
 
-        // last 24 hours time
-        const last24 = new Date();
-        last24.setHours(last24.getHours() - 24);
+        const last24 = new Date(now.getTime() - 24 * 60 * 60 * 1000); // last 24h
 
-        // DB se count per hour
+        // venue timezone: yaha 'Asia/Kolkata' ya venue.timezone dynamic ho sakta hai
+        const timezone = "Asia/Kolkata";
+
         const bookings = await Reservation.aggregate([
             {
                 $match: {
@@ -132,29 +143,29 @@ exports.getBooking24hTrend = async (req, res) => {
             },
             {
                 $group: {
-                    _id: { $hour: "$createdAt" }, // hour nikal
+                    _id: {
+                        $hour: {
+                            date: "$createdAt",
+                            timezone: timezone // 🟢 important
+                        }
+                    },
                     count: { $sum: 1 }
                 }
             }
         ]);
 
-        // final result
         let result = [];
 
         for (let i = 0; i < 24; i++) {
-
             const found = bookings.find(b => b._id === i);
-
             result.push({
                 hour: i,
+                // label: `${i}:00-${i}:59`,
                 count: found ? found.count : 0
             });
         }
 
-        res.json({
-            success: true,
-            data: result
-        });
+        res.json({ success: true, data: result });
 
     } catch (err) {
         console.log(err);
@@ -204,7 +215,7 @@ exports.getBookingKPIs = async (req, res) => {
         const prevYearEnd = new Date(yearStart);
         prevYearEnd.setMilliseconds(-1);
 
-        const field = "createdAt"; // 🔴 change if needed
+        const field = "createdAt"; //  change if needed
 
         const [
             today,
@@ -239,6 +250,7 @@ exports.getBookingKPIs = async (req, res) => {
                 type: p >= 0 ? "increase" : "decrease"
             };
         };
+        // I am safe okk ye esa nhi hota okk
 
         res.json({
             success: true,
@@ -279,7 +291,12 @@ exports.getBookingKPIs = async (req, res) => {
 
 exports.mostActiveVenues = async (req, res) => {
     try {
-        const { range } = req.body || "30days";
+        let { range } = req.body || {};
+
+        //  agar empty, null, undefined → 12months
+        if (!range) {
+            range = "12months";
+        }
 
         let startDate = new Date();
 
@@ -345,7 +362,7 @@ exports.mostActiveVenues = async (req, res) => {
             message: error.message
         })
     }
-}
+};
 
 exports.getRemiUsersStats = async (req, res) => {
     try {
@@ -407,5 +424,127 @@ exports.getRemiUsersStats = async (req, res) => {
             success: false,
             message: error.message
         });
+    }
+};
+
+exports.getRishAndStatus = async (req, res) => {
+    try {
+        const range = req.body?.range || "12m";
+
+        // 12m, 3m, 30d, 7d, 24h
+
+        let startDate = new Date();
+
+        if (range === "24h") startDate.setHours(startDate.getHours() - 24);
+        if (range === "7d") startDate.setDate(startDate.getDate() - 7);
+        if (range === "30d") startDate.setDate(startDate.getDate() - 30);
+        if (range === "3m") startDate.setMonth(startDate.getMonth() - 3);
+        if (range === "12m") startDate.setMonth(startDate.getMonth() - 12);
+
+        // ==============================
+        //  HIGH NO SHOW VENUES
+        // ==============================
+        const noShowData = await Reservation.aggregate([
+            {
+                $match: {
+                    restaurantId: { $ne: null },
+                    date: { $gte: startDate }
+                }
+            },
+            {
+                $group: {
+                    _id: "$restaurantId",
+                    total: { $sum: 1 },
+                    noShow: {
+                        $sum: {
+                            $cond: [
+                                { $in: ["$status", ["No-show", "No Show", "noshow"]] },
+                                1,
+                                0
+                            ]
+                        }
+                    }
+                }
+            },
+            {
+                $addFields: {
+                    noShowRate: {
+                        $cond: [
+                            { $eq: ["$total", 0] },
+                            0,
+                            {
+                                $multiply: [
+                                    { $divide: ["$noShow", "$total"] },
+                                    100
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+
+            {
+                $match: {
+                    noShowRate: { $gt: 15 }
+                }
+            },
+
+            { $sort: { noShowRate: -1 } },
+            { $limit: 4 },
+
+            {
+                $lookup: {
+                    from: "restaurants",
+                    localField: "_id",
+                    foreignField: "_id",
+                    as: "restaurant"
+                }
+            },
+            { $unwind: "$restaurant" },
+
+            {
+                $project: {
+                    name: "$restaurant.venueName",
+                    rate: { $round: ["$noShowRate", 1] }
+                }
+            }
+        ]);
+
+
+        // ==============================
+        //  PAYMENT ISSUES
+        // ==============================
+        const paymentIssues = await Restaurant.countDocuments({
+            status: "Suspended"
+        });
+
+        // ==============================
+        //  SUSPENDED / LOCKED
+        // ==============================
+        const suspendedVenues = await Restaurant.countDocuments({
+            status: { $in: ["Suspended", "Locked"] }
+        });
+
+        // ==============================
+        //  TOTAL BILLED
+        // (demo static for now)
+        // ==============================
+        const billed = 18450.75;
+        const noShowFees = 12340.5;
+        const deposits = 6110.25;
+
+        res.json({
+            countNoShowVenues: noShowData.length,
+            highNoShowVenues: noShowData,
+            paymentIssues,
+            suspendedVenues,
+            billedCharges: billed,
+            noShowFees,
+            deposits
+        });
+
+    } catch (err) {
+        console.log(err);
+        res.status(500).json({ message: "Dashboard error" });
     }
 };

@@ -10,6 +10,8 @@ const adminRouter = require('./routes/adminRoutes');
 const restRouter = require('./routes/restaurantRoutes');
 const reservRouter = require('./routes/reservationRoutes');
 require("./jobs/blockExpiry.job");
+require("./jobs/unlockTable.job");
+require("./jobs/reservationStatus.job");
 
 const app = express();
 app.use(express.json());

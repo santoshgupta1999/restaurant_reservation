@@ -547,157 +547,6 @@ exports.updateGuestStatus = async (req, res) => {
     }
 };
 
-// exports.getRemiUsersList = async (req, res) => {
-//     try {
-//         const {
-//             search = "",
-//             page = 1,
-//             limit = 30,
-//             dateFrom,
-//             dateTo,
-//             minVisits,
-//             maxNoShows
-//         } = req.body;
-
-//         const skip = (page - 1) * limit;
-//         const REMI_REGEX = /(Remi user|Remi influencer)/i;
-
-//         const matchGuest = {
-//             tags: { $elemMatch: { $regex: REMI_REGEX } }
-//         };
-
-//         if (search) {
-//             matchGuest.$or = [
-//                 { firstName: { $regex: search, $options: "i" } },
-//                 { lastName: { $regex: search, $options: "i" } },
-//                 { email: { $regex: search, $options: "i" } },
-//                 { phone: { $regex: search, $options: "i" } }
-//             ];
-//         }
-
-//         const reservationMatch = {};
-//         if (dateFrom && dateTo) {
-//             reservationMatch.date = {
-//                 $gte: new Date(dateFrom),
-//                 $lte: new Date(dateTo)
-//             };
-//         }
-
-//         const pipeline = [
-//             { $match: matchGuest },
-
-//             {
-//                 $lookup: {
-//                     from: "reservations",
-//                     localField: "_id",
-//                     foreignField: "guestId",
-//                     pipeline: [
-//                         { $match: reservationMatch }
-//                     ],
-//                     as: "reservations"
-//                 }
-//             },
-
-//             {
-//                 $addFields: {
-//                     visits: { $size: "$reservations" },
-//                     venues: {
-//                         $size: {
-//                             $setUnion: ["$reservations.restaurantId", []]
-//                         }
-//                     },
-//                     lastVisit: { $max: "$reservations.date" },
-//                     noShows: {
-//                         $size: {
-//                             $filter: {
-//                                 input: "$reservations",
-//                                 as: "r",
-//                                 cond: { $eq: ["$$r.status", "No-show"] }
-//                             }
-//                         }
-//                     }
-//                 }
-//             },
-
-//             ...(minVisits ? [{ $match: { visits: { $gte: minVisits } } }] : []),
-//             ...(maxNoShows ? [{ $match: { noShows: { $lte: maxNoShows } } }] : []),
-
-//             // {
-//             //     $project: {
-//             //         guestId: "$_id",
-//             //         restaurantId: "$restaurantId",
-//             //         name: { $concat: ["$firstName", " ", "$lastName"] },
-//             //         remiId: 1,
-//             //         email: 1,
-//             //         phone: 1,
-//             //         visits: 1,
-//             //         venues: 1,
-//             //         lastVisit: 1,
-//             //         noShows: 1,
-//             //         _id: 0
-//             //     }
-//             // },
-
-//             {
-//                 $project: {
-//                     guestId: "$_id",
-
-//                     // 👇 BASIC USER INFO
-//                     firstName: 1,
-//                     lastName: 1,
-//                     email: 1,
-//                     secondaryEmail: 1,
-//                     phone: 1,
-//                     secondaryPhone: 1,
-//                     dob: 1,
-//                     address: 1,
-//                     anniversary: 1,
-//                     gender: 1,
-//                     createdAt: 1,
-//                     marketingOptIn: 1,
-
-//                     // 👇 OPTIONAL (agar frontend ko name chahiye)
-//                     name: { $concat: ["$firstName", " ", "$lastName"] },
-
-//                     // 👇 REMI / STATS
-//                     remiId: 1,
-//                     visits: 1,
-//                     venues: 1,
-//                     lastVisit: 1,
-//                     noShows: 1,
-
-//                     _id: 0
-//                 }
-//             },
-
-//             { $sort: { visits: -1 } },
-//             { $skip: skip },
-//             { $limit: Number(limit) }
-//         ];
-
-//         const [data, total] = await Promise.all([
-//             Guest.aggregate(pipeline),
-//             Guest.countDocuments(matchGuest)
-//         ]);
-
-//         return res.json({
-//             success: true,
-//             total,
-//             page: Number(page),
-//             limit: Number(limit),
-//             data
-//         });
-
-//     } catch (error) {
-//         console.error("Remi Users List Error:", error);
-//         res.status(500).json({
-//             success: false,
-//             message: "Failed to fetch Remi users list",
-//             error: error.message
-//         });
-//     }
-// };
-
 exports.getRemiUsersList = async (req, res) => {
     try {
 
@@ -1050,5 +899,63 @@ exports.getGlobalVisit = async (req, res) => {
             success: false,
             error: error.message
         });
+    }
+};
+
+exports.getRemiUserDashboard = async (req, res) => {
+    try {
+        const { guestId } = req.body;
+
+        if (!guestId) {
+            return res.status(400).json({ message: "guestId required" });
+        }
+
+        const id = new mongoose.Types.ObjectId(guestId);
+
+        const totalReservations = await Reservation.countDocuments({ guestId: id });
+
+        const totalVisits = await Reservation.countDocuments({
+            guestId: id,
+            status: "Finished"
+        });
+
+        const noShow = await Reservation.countDocuments({
+            guestId: id,
+            status: "No-show"
+        });
+
+        const venues = await Reservation.distinct("restaurantId", {
+            guestId: id
+        });
+
+        const channels = await Reservation.aggregate([
+            { $match: { guestId: id } },
+            {
+                $group: {
+                    _id: "$source",
+                    count: { $sum: 1 }
+                }
+            }
+        ]);
+
+
+        const result = channels.map(i => ({
+            source: i._id,
+            percentage: ((i.count / totalReservations) * 100).toFixed(1) + "%"
+        }));
+
+        res.json({
+            success: true,
+            data: {
+                totalVisits,
+                totalVenuesVisited: venues.length,
+                noShow,
+                totalReservations,
+                topChannels: result
+            }
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: err.message });
     }
 };

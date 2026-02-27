@@ -33,7 +33,7 @@ const reservationSchema = new mongoose.Schema({
     status: {
         type: String,
         enum: ["Pending", "Confirmed", "Seated", "Cancelled", "No-show", "Finished"],
-        default: "Pending"
+        default: "Confirmed"
     },
     source: {
         type: String,
@@ -54,5 +54,22 @@ const reservationSchema = new mongoose.Schema({
 
     notes: String
 }, { timestamps: true });
+
+reservationSchema.pre("findOneAndUpdate", async function (next) {
+    const doc = await this.model.findOne(this.getQuery());
+
+    if (doc && doc.status === "Finished") {
+        return next(new Error("Finished reservation cannot be modified."));
+    }
+
+    next();
+});
+
+reservationSchema.pre("save", function (next) {
+    if (!this.isNew && this.status === "Finished") {
+        return next(new Error("Finished reservation cannot be modified."));
+    }
+    next();
+});
 
 module.exports = mongoose.model("Reservation", reservationSchema);

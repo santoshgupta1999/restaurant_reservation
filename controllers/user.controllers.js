@@ -134,6 +134,63 @@ exports.login = async (req, res) => {
     }
 };
 
+exports.superAdminLogin = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid Email",
+            });
+        }
+
+        if (user.role !== "super_admin") {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied. Not a Super Admin.",
+            });
+        }
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid password.",
+            });
+        }
+
+        const token = jwt.sign(
+            {
+                id: user._id,
+                role: user.role,
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: "30d" }
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Login successfully",
+            token,
+            data: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+            },
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+        });
+    }
+};
+
 exports.getProfile = async (req, res) => {
     try {
         const userId = req.user?.id;
@@ -250,6 +307,74 @@ exports.updateProfile = async (req, res) => {
     }
 };
 
+// exports.changePassword = async (req, res) => {
+//     try {
+//         const { oldPassword, newPassword, confirmPassword } = req.body;
+
+//         if (!oldPassword || !newPassword || !confirmPassword) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'All fields are required'
+//             });
+//         }
+
+//         if (newPassword.length < 6) {
+//             return res.status(400).json({
+//                 success: true,
+//                 message: 'New password at least 6 characters long'
+//             });
+//         }
+
+//         if (oldPassword === newPassword) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "New Password must be different from Old Password"
+//             });
+//         }
+
+//         if (newPassword !== confirmPassword) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "New password and confirm password do not match"
+//             });
+//         }
+
+//         const user = await User.findById(req.user._id);
+//         if (!user) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: 'User not found'
+//             });
+//         }
+
+//         const isMatch = await bcrypt.compare(oldPassword, user.password);
+//         if (!isMatch) {
+//             return res.status(401).json({
+//                 success: false,
+//                 message: "Old password is incorrect"
+//             });
+//         }
+
+//         const salt = await bcrypt.genSalt(10);
+//         const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+//         user.password = hashedPassword;
+//         await user.save();
+
+//         return res.status(200).json({
+//             success: true,
+//             message: "Password updated successfully"
+//         });
+
+//     } catch (error) {
+//         console.error("Error while changing Password", error);
+//         res.status(500).json({
+//             success: false,
+//             message: "Error while changing password"
+//         });
+//     }
+// };
+
 exports.changePassword = async (req, res) => {
     try {
         const { oldPassword, newPassword, confirmPassword } = req.body;
@@ -322,52 +447,76 @@ exports.forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;
 
-        if (!email) {
-            return res.status(400).json({ success: false, message: "Email is required" });
-        }
-
         const user = await User.findOne({ email });
         if (!user) {
-            return res.status(404).json({ success: false, message: "User not found" });
+            return res.status(400).
+                json({
+                    success: false,
+                    message: "User not found"
+                });
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        const token = crypto.randomBytes(32).toString("hex");
 
-        await UserOtp.deleteMany({ userId: user._id });
+        user.resetPasswordToken = token;
+        user.resetPasswordExpire = Date.now() + 1000 * 60 * 15; // 15 min
 
-        await UserOtp.create({ userId: user._id, otp, expiresAt });
+        await user.save();
+
+        const resetLink = `${process.env.FRONTEND_URL}${token}`;
+        const fullName = `${user.name || ""}`.trim();
+        const subject = "Password Reset Request";
 
         const message = `
-        Your OTP for password reset is:
+Dear ${fullName || "User"},
 
-        ${otp}
+We received a request to reset your account password.
 
-        This OTP is valid for 5 minutes.
-        `;
+To create a new password, please click the link below:
 
-        await sendMail(user.email, "Password Reset OTP", message);
+${resetLink}
 
-        const token = jwt.sign(
-            { userId: user._id, userEmail: user.email, purpose: 'forgot_password' },
-            process.env.JWT_SECRET,
-            { expiresIn: '10m' }
-        );
+This link will expire in 15 minutes for security reasons.
 
-        return res.status(200).json({
+If you did not request a password reset, please ignore this email. 
+Your account will remain secure.
+
+If you need help, contact our support team.
+
+Best Regards,  
+Restaurant Team
+`;
+
+
+        await sendMail(user.email, subject, message);
+
+        res.json({
             success: true,
-            message: "OTP sent successfully to your email",
-            token,
-            otp
+            message: "Reset link sent to email",
+            token
         });
-    } catch (error) {
-        console.error("Forgot Password Error:", error);
-        return res.status(500).json({
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+exports.verifyResetLink = async (req, res) => {
+    const { token } = req.params;
+
+    const user = await User.findOne({
+        resetPasswordToken: token,
+        resetPasswordExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+        return res.status(400).json({
             success: false,
-            message: "Server error while sending OTP",
-            Error: error.message
+            message: "Link expired"
         });
     }
+
+    res.json({ success: true });
 };
 
 exports.verifyOtp = async (req, res) => {
@@ -443,49 +592,61 @@ exports.verifyOtp = async (req, res) => {
 
 exports.resetPassword = async (req, res) => {
     try {
+        const { token } = req.params;
         const { newPassword, confirmPassword } = req.body;
-
-        if (!newPassword || !confirmPassword) {
-            return res.status(400).json({
-                success: false,
-                message: 'New password and confirm password are required',
-            });
-        }
-
-        if (newPassword.length < 6) {
-            return res.status(400).json({
-                success: false,
-                message: 'Password must be at least 6 characters long',
-            });
-        }
 
         if (newPassword !== confirmPassword) {
             return res.status(400).json({
                 success: false,
-                message: 'New password and confirm password do not match',
+                message: "Passwords do not match"
             });
         }
 
-        const user = req.user;
+        const user = await User.findOne({
+            resetPasswordToken: token,
+            resetPasswordExpire: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({
+                success: false,
+                message: "Link expired"
+            });
+        }
 
         const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(newPassword, salt);
+        user.password = await bcrypt.hash(newPassword, salt);
 
-        user.password = hashedPassword;
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
+
         await user.save();
 
-        res.status(200).json({
+        const loginToken = jwt.sign(
+            {
+                id: user._id,
+                role: user.role,
+                restaurantId: user.restaurantId || null,
+            },
+            process.env.JWT_SECRET || "MY_SUPER_SECRET_KEY",
+            { expiresIn: "30d" }
+        );
+
+        res.json({
             success: true,
-            message: 'Password reset successfully',
+            message: "Password reset successful",
+            token: loginToken,
+            data: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                restaurantId: user.restaurantId,
+            },
         });
 
-    } catch (error) {
-        console.error('Reset Password Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error during reset password',
-            error: error.message,
-        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 };
 
@@ -728,11 +889,9 @@ exports.getStaffs = async (req, res) => {
         const { restaurantId } = req.query;
 
         const filter = {
-            role: "host",
-            isActive: true
+            role: { $in: ["Host", "Manager"] },
         };
 
-        // Optional restaurant filter
         if (restaurantId) {
             if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
                 return res.status(400).json({
@@ -744,11 +903,11 @@ exports.getStaffs = async (req, res) => {
             filter.restaurantId = restaurantId;
         }
 
-        const managers = await User.find(filter)
+        const staffs = await User.find(filter)
             .select("-password")
-            .populate("restaurantId", "name email phone");
+            .populate("restaurantId", "venueName email phone");
 
-        if (!managers.length) {
+        if (!staffs.length) {
             return res.status(404).json({
                 success: false,
                 message: restaurantId
@@ -760,8 +919,8 @@ exports.getStaffs = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: "Staffs fetched successfully",
-            count: managers.length,
-            data: managers
+            count: staffs.length,
+            data: staffs
         });
 
     } catch (error) {
@@ -842,6 +1001,158 @@ exports.updateUsersById = async (req, res) => {
             success: false,
             message: "Error updating profile",
             error: error.message,
+        });
+    }
+};
+
+exports.addStaff = async (req, res) => {
+    try {
+        const { id, email, password, role, restaurantId, isActive } = req.body;
+
+        const allowedRoles = ["Host", "Manager"];
+
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: "Email is required"
+            });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+
+        if (id) {
+
+            if (!mongoose.Types.ObjectId.isValid(id)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid staff id"
+                });
+            }
+
+            if (!role || !restaurantId || typeof isActive !== "boolean") {
+                return res.status(400).json({
+                    success: false,
+                    message: "Role, restaurantId and status are required"
+                });
+            }
+
+            if (!allowedRoles.includes(role)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Role must be either Host or Manager"
+                });
+            }
+
+            if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid restaurantId"
+                });
+            }
+
+            const existingStaff = await User.findById(id);
+            if (!existingStaff) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Staff not found"
+                });
+            }
+
+            const emailExists = await User.findOne({
+                email: normalizedEmail,
+                _id: { $ne: id }
+            });
+
+            if (emailExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Staff with this email already exists"
+                });
+            }
+
+            // Prepare update object
+            const updateData = {
+                email: normalizedEmail,
+                role,
+                restaurantId,
+                isActive
+            };
+
+            // Only update password if provided
+            if (password && password.trim() !== "") {
+                const hashedPassword = await bcrypt.hash(password, 10);
+                updateData.password = hashedPassword;
+            }
+
+            const updatedStaff = await User.findByIdAndUpdate(
+                id,
+                updateData,
+                { new: true, runValidators: true }
+            );
+
+            const response = updatedStaff.toObject();
+            delete response.password;
+
+            return res.status(200).json({
+                success: true,
+                message: "Staff updated successfully",
+                data: response
+            });
+        }
+        if (!password || !role || !restaurantId || typeof isActive !== "boolean") {
+            return res.status(400).json({
+                success: false,
+                message: "All required fields must be provided"
+            });
+        }
+
+        if (!allowedRoles.includes(role)) {
+            return res.status(400).json({
+                success: false,
+                message: "Role must be either Host or Manager"
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid restaurantId"
+            });
+        }
+
+        const existingUser = await User.findOne({ email: normalizedEmail });
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: "Staff with this email already exists"
+            });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const newStaff = await User.create({
+            email: normalizedEmail,
+            password: hashedPassword,
+            role,
+            restaurantId,
+            isActive
+        });
+
+        const staffResponse = newStaff.toObject();
+        delete staffResponse.password;
+
+        return res.status(201).json({
+            success: true,
+            message: "Staff added successfully",
+            data: staffResponse
+        });
+
+    } catch (error) {
+        console.error("Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Something went wrong",
+            error: error.message
         });
     }
 };

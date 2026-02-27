@@ -16,7 +16,10 @@ const {
     getManagers,
     updateManagerById,
     getStaffs,
-    updateUsersById
+    superAdminLogin,
+    updateUsersById,
+    addStaff,
+    verifyResetLink
 } = require("../controllers/user.controllers.js");
 
 const { registerValidator, loginValidator, updateProfileValidator, } = require("../validators/userValidation.js");
@@ -28,14 +31,17 @@ const router = express.Router();
 
 router.post("/signup", registerValidator, validate, register);
 router.post("/login", loginValidator, validate, login);
+router.post("/super-admin/login", loginValidator, validate, superAdminLogin);
 router.get('/profile', verifyToken, getProfile);
 router.post('/profile', upload.single('profile'), verifyToken,
     updateProfileValidator, validate, updateProfile);
 
 router.post('/change-password', verifyToken, changePassword);
-router.post('/forgot-password', forgotPassword);
 router.post('/verify-otp', verifyToken, verifyOtp);
-router.post('/reset-password', verifyToken, resetPassword);
+router.post('/forgot-password', forgotPassword);
+router.get("/verify-reset/:token", verifyResetLink);
+// router.post('/verify-otp', verifyToken, verifyOtp);
+router.post("/reset-password/:token", resetPassword);
 
 router.get('/all_active', getAllActiveUser);
 router.get('/getAllUsers', getAllUsers);
@@ -51,6 +57,7 @@ router.put('/markAllAsRead', verifyToken, notificationController.markAllAsRead);
 
 router.post('/getManagers', getManagers);
 router.post('/getStaffs', getStaffs);
+router.post('/add-staff', addStaff);
 
 router.post('/updateUsersById', upload.single('profile'),
     updateProfileValidator, validate, updateUsersById);

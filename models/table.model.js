@@ -109,6 +109,11 @@ const tableSchema = new mongoose.Schema(
             type: Boolean,
             default: false
         },
+
+        lockedAt: {
+            type: Date,
+            default: null
+        },
     },
     { timestamps: true }
 );

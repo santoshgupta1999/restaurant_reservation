@@ -41,6 +41,7 @@ router.post('/getRemiUsersList', guestController.getRemiUsersList);
 router.post('/editGuest', guestController.editGuest);
 router.post('/getRemiUsersList/reservations', guestController.getCrossVenue);
 router.post('/getRemiUsersList/getGlobalVisit', guestController.getGlobalVisit);
+router.post('/getRemiUsersList/metrics', guestController.getRemiUserDashboard);
 
 // restaurant
 
@@ -52,8 +53,12 @@ router.post('/venues/opertionalMetrics', restController.opertionalMetrics);
 router.post('/venues', restaurantController.getVenueList);
 
 // Tier
-router.post("/tiers/add", TierController.createTier)
-router.post("/tiers", TierController.getTiers)
+router.post("/tiers/add", TierController.createTier);
+router.post("/tiers", TierController.getTiers);
+router.post("/tiers/details", TierController.getTierById);
+router.post("/tiers/updateTier", TierController.updateTier);
+router.post("/tiers/status", TierController.updateTierStatus);
+router.post("/tiers/delete", TierController.deleteTier);
 
 // dashborad
 router.post("/dashboard/venues", DashboardController.getVenues);
@@ -61,5 +66,6 @@ router.post("/dashboard/getBooking24hTrend", DashboardController.getBooking24hTr
 router.post("/dashboard/getBookingKPIs", DashboardController.getBookingKPIs);
 router.post("/dashboard/mostActiveVenues", DashboardController.mostActiveVenues);
 router.post("/dashboard/getRemiUsersStats", DashboardController.getRemiUsersStats);
+router.post("/dashboard/getRiskAndStatus", DashboardController.getRishAndStatus);
 
 module.exports = router;

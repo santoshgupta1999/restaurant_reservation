@@ -8,7 +8,7 @@ const Restaurant = require('../models/Restaurant.model');
 const mongoose = require('mongoose');
 // const sendSMS = require('../utils/sendSMS'); // <-- optional SMS helper
 const sendEmail = require('../utils/mailer'); // <-- optional Email helper
-
+const { sendReservationNotification } = require("../utils/reservationNotification");
 // const getDayOfWeek = (dateString) => {
 //     const date = new Date(dateString);
 //     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -43,6 +43,22 @@ exports.createReservation = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: "restaurantId, date & time are required."
+            });
+        }
+
+        const allowedSources = ["Online", "Walk-in", "Phone", "Email", "Remi"];
+
+        if (source && !allowedSources.includes(source)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid source type."
+            });
+        }
+
+        if (!partySize || partySize <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid partySize is required."
             });
         }
 
@@ -117,6 +133,74 @@ exports.createReservation = async (req, res) => {
             });
         }
 
+        if (tableId) {
+            const table = await Table.findById(tableId);
+
+            // if (!table) {
+            //     return res.status(404).json({
+            //         success: false,
+            //         message: "Table not found."
+            //     });
+            // }
+
+            if (table.status === "OutOfService") {
+                return res.status(400).json({
+                    success: false,
+                    message: "This table is currently locked (Out of Service). Please choose another table."
+                });
+            }
+
+            if (partySize > table.capacity) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Party size exceeds table capacity."
+                });
+            }
+        }
+
+        if (tableId) {
+            const existingBooking = await Reservation.findOne({
+                restaurantId,
+                tableId,
+                date: reservationDate,
+                time,
+                status: { $in: ["Pending", "Confirmed", "Seated"] },
+                _id: { $ne: reservationId }
+            });
+
+            if (existingBooking) {
+                return res.status(400).json({
+                    success: false,
+                    message: "This table is already booked for selected time."
+                });
+            }
+        }
+
+        const conflictingBlock = await Block.findOne({
+            restaurantId,
+            status: "Active",
+            isExpired: false,
+            startDate: { $lte: reservationDate },
+            endDate: { $gte: reservationDate },
+            $or: [
+                { isFullRestaurantBlock: true },
+                tableId ? { tableIds: tableId } : {},
+                shift ? { shiftIds: shift._id } : {}
+            ]
+        });
+
+        if (conflictingBlock) {
+            return res.status(400).json({
+                success: false,
+                message: `This table is not available from ${conflictingBlock.startDate.toDateString()} to ${conflictingBlock.endDate.toDateString()}. Please choose another table.`,
+                block: {
+                    reason: conflictingBlock.reason,
+                    startDate: conflictingBlock.startDate,
+                    endDate: conflictingBlock.endDate
+                }
+            });
+        }
+
         let guest = null;
 
         if (guestPhone) {
@@ -153,9 +237,20 @@ exports.createReservation = async (req, res) => {
             });
         }
 
+        let statusChanged = false;
         let reservation;
 
         if (existingReservation) {
+
+            if (existingReservation.status === "Finished") {
+                return res.status(400).json({
+                    success: false,
+                    message: "Finished reservation cannot be modified."
+                });
+            }
+            if (status && existingReservation.status !== status) {
+                statusChanged = true;
+            }
             // UPDATE
             existingReservation.tableId = tableId || existingReservation.tableId;
             existingReservation.shiftId = shift._id;
@@ -186,6 +281,25 @@ exports.createReservation = async (req, res) => {
                 tags,
                 notes
             });
+
+            if (["Confirmed", "Cancelled"].includes(reservation.status)) {
+                statusChanged = true;
+            }
+        }
+
+        await Guest.findByIdAndUpdate(guest._id, {
+            upcomingVisitAt: reservationDate
+        });
+
+        if (
+            statusChanged &&
+            ["Confirmed", "Cancelled"].includes(reservation.status)
+        ) {
+            sendReservationNotification(
+                reservation,
+                guest,
+                reservation.status
+            ).catch(console.error);
         }
 
         return res.status(200).json({
@@ -242,7 +356,31 @@ exports.getReservations = async (req, res) => {
 
         /* ---------------- STATUS FILTER ---------------- */
         if (status) {
-            query.status = status;
+
+            if (status === "Upcoming") {
+
+                const now = new Date();
+                const todayStart = new Date();
+                todayStart.setHours(0, 0, 0, 0);
+
+                const currentTime = now.toTimeString().slice(0, 5);
+
+                query.status = { $in: ["Pending", "Confirmed"] };
+
+                query.$or = [
+                    // Future dates
+                    { date: { $gt: todayStart } },
+
+                    // Today but future time
+                    {
+                        date: { $eq: todayStart },
+                        time: { $gte: currentTime }
+                    }
+                ];
+
+            } else {
+                query.status = status;
+            }
         }
 
         /* ---------------- SOURCE FILTER ---------------- */
@@ -535,7 +673,7 @@ exports.updateReservationStatus = async (req, res) => {
         const { id } = req.params;
         const { status } = req.body;
 
-        const allowedStatuses = ["Pending", "Confirmed", "Seated", "Canceled", "No-show", "Finished"];
+        const allowedStatuses = ["Pending", "Confirmed", "Seated", "Cancelled", "No-show", "Finished"];
 
         if (!id || id.length !== 24) {
             return res.status(400).json({

@@ -1099,64 +1099,148 @@ exports.getAvailableTables = async (req, res) => {
     }
 };
 
+// exports.mergeTables = async (req, res) => {
+//     try {
+//         const { tableIds } = req.body;
+
+//         if (!Array.isArray(tableIds) || tableIds.length < 2) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "At least two tableIds are required to merge."
+//             });
+//         }
+
+//         const tables = await Table.find({ _id: { $in: tableIds } });
+
+//         if (tables.length !== tableIds.length) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "One or more tables not found."
+//             });
+//         }
+
+//         const restaurantId = tables[0].restaurantId.toString();
+
+//         const sameRestaurant = tables.every(
+//             t => t.restaurantId.toString() === restaurantId
+//         );
+
+//         if (!sameRestaurant) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "All tables must belong to the same restaurant."
+//             });
+//         }
+
+//         const roomId = tables[0].roomId?.toString();
+
+//         const sameRoom = tables.every(
+//             t => t.roomId?.toString() === roomId
+//         );
+
+//         if (!sameRoom) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "All tables must belong to the same room."
+//             });
+//         }
+
+//         let finalTableSet = new Set(tableIds.map(id => id.toString()));
+
+//         // include already merged tables
+//         tables.forEach(table => {
+//             if (table.joinedWith && table.joinedWith.length > 0) {
+//                 table.joinedWith.forEach(id =>
+//                     finalTableSet.add(id.toString())
+//                 );
+//             }
+//         });
+
+//         const finalTableIds = Array.from(finalTableSet);
+
+//         await Table.updateMany(
+//             { _id: { $in: finalTableIds } },
+//             {
+//                 $set: {
+//                     isJoined: true,
+//                     joinedWith: finalTableIds
+//                 }
+//             }
+//         );
+
+//         return res.status(200).json({
+//             success: true,
+//             message: "Tables merged successfully.",
+//             data: {
+//                 restaurantId,
+//                 roomId,
+//                 mergedTableIds: finalTableIds
+//             }
+//         });
+
+//     } catch (error) {
+//         console.error("Error merging tables:", error);
+//         return res.status(500).json({
+//             success: false,
+//             message: "Error merging tables.",
+//             error: error.message
+//         });
+//     }
+// };
+
+
 exports.mergeTables = async (req, res) => {
     try {
         const { tableIds } = req.body;
 
-        if (!Array.isArray(tableIds) || tableIds.length < 2) {
+        if (!Array.isArray(tableIds) || tableIds.length !== 2) {
             return res.status(400).json({
                 success: false,
-                message: "At least two tableIds are required to merge."
+                message: "Exactly two tableIds are required to merge."
             });
         }
 
-        const tables = await Table.find({ _id: { $in: tableIds } });
+        const [tableAId, tableBId] = tableIds;
 
-        if (tables.length !== tableIds.length) {
+        const tableA = await Table.findById(tableAId);
+        const tableB = await Table.findById(tableBId);
+
+        if (!tableA || !tableB) {
             return res.status(404).json({
                 success: false,
                 message: "One or more tables not found."
             });
         }
 
-        const restaurantId = tables[0].restaurantId.toString();
-
-        const sameRestaurant = tables.every(
-            t => t.restaurantId.toString() === restaurantId
-        );
-
-        if (!sameRestaurant) {
+        if (tableA.restaurantId.toString() !== tableB.restaurantId.toString()) {
             return res.status(400).json({
                 success: false,
-                message: "All tables must belong to the same restaurant."
+                message: "Tables must belong to same restaurant."
             });
         }
 
-        const roomId = tables[0].roomId?.toString();
-
-        const sameRoom = tables.every(
-            t => t.roomId?.toString() === roomId
-        );
-
-        if (!sameRoom) {
+        if (tableA.roomId.toString() !== tableB.roomId.toString()) {
             return res.status(400).json({
                 success: false,
-                message: "All tables must belong to the same room."
+                message: "Tables must belong to same room."
             });
         }
 
-        let finalTableSet = new Set(tableIds.map(id => id.toString()));
+        let finalSet = new Set();
 
-        // include already merged tables
-        tables.forEach(table => {
-            if (table.joinedWith && table.joinedWith.length > 0) {
-                table.joinedWith.forEach(id =>
-                    finalTableSet.add(id.toString())
-                );
-            }
-        });
+        if (tableA.isJoined && tableA.joinedWith.length > 0) {
+            tableA.joinedWith.forEach(id => finalSet.add(id.toString()));
+        } else {
+            finalSet.add(tableA._id.toString());
+        }
 
-        const finalTableIds = Array.from(finalTableSet);
+        if (tableB.isJoined && tableB.joinedWith.length > 0) {
+            tableB.joinedWith.forEach(id => finalSet.add(id.toString()));
+        } else {
+            finalSet.add(tableB._id.toString());
+        }
+
+        const finalTableIds = Array.from(finalSet);
 
         await Table.updateMany(
             { _id: { $in: finalTableIds } },
@@ -1172,8 +1256,6 @@ exports.mergeTables = async (req, res) => {
             success: true,
             message: "Tables merged successfully.",
             data: {
-                restaurantId,
-                roomId,
                 mergedTableIds: finalTableIds
             }
         });
@@ -1298,20 +1380,25 @@ exports.getAllMergedTables = async (req, res) => {
 };
 
 exports.lockTable = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
         const { tableId, reason, force } = req.body;
         const userId = req.user?._id;
 
         if (!tableId) {
+            await session.abortTransaction();
             return res.status(400).json({
                 success: false,
                 message: "tableId is required"
             });
         }
 
-        const table = await Table.findById(tableId);
+        const table = await Table.findById(tableId).session(session);
 
         if (!table) {
+            await session.abortTransaction();
             return res.status(404).json({
                 success: false,
                 message: "Table not found"
@@ -1319,51 +1406,77 @@ exports.lockTable = async (req, res) => {
         }
 
         if (table.status === "OutOfService") {
+
             table.status = "Available";
             table.lockReason = null;
             table.lockedBy = null;
+            table.lockedAt = null;
 
-            await table.save();
+            await table.save({ session });
+
+            await session.commitTransaction();
+            session.endSession();
 
             return res.status(200).json({
                 success: true,
-                message: "Table unlocked successfully.",
-                data: {
-                    id: table._id,
-                    status: table.status
-                }
+                message: "Table unlocked successfully",
+                data: table
             });
         }
 
         if (["Reserved", "Seated"].includes(table.status) && !force) {
+            await session.abortTransaction();
             return res.status(400).json({
                 success: false,
-                message: `Table is currently ${table.status}. Use 'force': true to override.`
+                message: `Table is currently ${table.status}. Use force:true to override.`
             });
+        }
+
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
+        const todayEnd = new Date();
+        todayEnd.setHours(23, 59, 59, 999);
+
+        const todaysBookings = await Reservation.find({
+            tableId: table._id,
+            restaurantId: table.restaurantId,
+            date: { $gte: todayStart, $lte: todayEnd },
+            status: { $in: ["Pending", "Confirmed"] }
+        }).session(session);
+
+        for (let booking of todaysBookings) {
+            booking.status = "Cancelled";
+            booking.notes = "Cancelled due to table locked";
+            await booking.save({ session });
         }
 
         table.status = "OutOfService";
         table.lockReason = reason || "Temporarily unavailable";
         table.lockedBy = userId;
+        table.lockedAt = new Date();
 
-        await table.save();
+        await table.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
 
         return res.status(200).json({
             success: true,
-            message: "Table locked successfully.",
+            message: "Table locked successfully",
             data: {
-                id: table._id,
-                status: table.status,
-                lockReason: table.lockReason,
-                lockedBy: table.lockedBy
+                tableId: table._id,
+                cancelledBookings: todaysBookings.length
             }
         });
 
     } catch (error) {
-        console.error("Error toggling table lock:", error);
+        await session.abortTransaction();
+        session.endSession();
+
         return res.status(500).json({
             success: false,
-            message: "Error toggling table lock.",
+            message: "Error locking table",
             error: error.message
         });
     }
@@ -1401,7 +1514,7 @@ exports.getAllLockedTables = async (req, res) => {
 exports.updateTableStatus = async (req, res) => {
     try {
         const { id } = req.params;
-        const { status } = req.body;
+        const { status, source, partySize } = req.body;
 
         const allowedStatuses = ["Available", "Reserved", "Seated", "OutOfService"];
 
@@ -1412,13 +1525,9 @@ exports.updateTableStatus = async (req, res) => {
             });
         }
 
-        const updatedTable = await Table.findByIdAndUpdate(
-            id,
-            { status },
-            { new: true, runValidators: true }
-        ).populate("restaurantId", "name email phone");
+        const table = await Table.findById(id);
 
-        if (!updatedTable) {
+        if (!table) {
             return res.status(404).json({
                 success: false,
                 message: "Table not found."
@@ -1434,6 +1543,8 @@ exports.updateTableStatus = async (req, res) => {
         todayEnd.setHours(23, 59, 59, 999);
 
         if (status === "Seated") {
+
+            // Try to seat existing reservation first
             updatedReservation = await Reservation.findOneAndUpdate(
                 {
                     tableId: id,
@@ -1443,6 +1554,35 @@ exports.updateTableStatus = async (req, res) => {
                 { status: "Seated" },
                 { new: true, sort: { time: 1 } }
             );
+
+            // If no reservation found & source is Walk-in
+            if (!updatedReservation && source === "Walk-in") {
+
+                if (!partySize) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "partySize is required for walk-in seating."
+                    });
+                }
+
+                if (partySize > table.capacity) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Party size exceeds table capacity."
+                    });
+                }
+
+                updatedReservation = await Reservation.create({
+                    restaurantId: table.restaurantId,
+                    tableId: id,
+                    shiftId: null,
+                    date: new Date(),
+                    time: new Date().toTimeString().slice(0, 5),
+                    partySize,
+                    source: "Walk-in",
+                    status: "Seated"
+                });
+            }
         }
 
         if (status === "Available") {
@@ -1457,17 +1597,19 @@ exports.updateTableStatus = async (req, res) => {
             );
         }
 
+        // Finally update table status
+        table.status = status;
+        await table.save();
+
         return res.status(200).json({
             success: true,
             message: `Table status updated successfully to ${status}.`,
             data: {
                 table: {
-                    id: updatedTable._id,
-                    tableNumber: updatedTable.tableNumber,
-                    roomName: updatedTable.roomName,
-                    capacity: updatedTable.capacity,
-                    status: updatedTable.status,
-                    restaurant: updatedTable.restaurantId
+                    id: table._id,
+                    tableNumber: table.tableNumber,
+                    capacity: table.capacity,
+                    status: table.status
                 },
                 reservationUpdated: updatedReservation || null
             }
@@ -1477,8 +1619,7 @@ exports.updateTableStatus = async (req, res) => {
         console.error("Error updating table status:", error);
         return res.status(500).json({
             success: false,
-            message: "Error updating table status.",
-            error: error.message
+            message: error.message || "Error updating table status."
         });
     }
 };
