@@ -7,7 +7,7 @@ const storage = multer.diskStorage({
     destination: function (req, file, cb) {
         let folder = 'uploads/restaurants/others';
 
-        if (file.fieldname === 'logo') {
+        if (file.fieldname === 'heroImage') {
             folder = 'uploads/restaurants/logo';
         } else if (file.fieldname === 'images') {
             folder = 'uploads/restaurants/images';

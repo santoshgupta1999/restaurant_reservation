@@ -314,7 +314,7 @@ exports.editVenue = async (req, res) => {
 
                 const oldPath = path.join(
                     __dirname,
-                    "../uploads/restaurants",
+                    "../uploads/restaurants/logo/",
                     restaurant.heroImage
                 );
 
@@ -1522,3 +1522,172 @@ exports.editVenuePlanAndStatus = async (req, res) => {
 }
 
 
+exports.getWidgetRestaurantSlots = async (req, res) => {
+    try {
+
+        const { restaurantId } = req.params;
+        const { date, partySize = 1 } = req.body;
+
+        if (!restaurantId) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId is required"
+            });
+        }
+
+        if (!date) {
+            return res.status(400).json({
+                success: false,
+                message: "Date is required"
+            });
+        }
+
+        const selectedDate = moment(date, "YYYY-MM-DD", true);
+
+        if (!selectedDate.isValid()) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid date format. Use YYYY-MM-DD"
+            });
+        }
+
+        const now = moment();
+
+        /* ================= FETCH ACTIVE SHIFTS ================= */
+
+        const shifts = await Shift.find({
+            restaurantId,
+            isActive: true
+        }).sort({ startTime: 1 });
+
+        if (!shifts.length) {
+            return res.status(200).json({
+                success: true,
+                data: []
+            });
+        }
+
+        const selectedDay = selectedDate.format("dd"); // Mo, Tu, We...
+
+        let groupedSlots = [];
+
+        for (let shift of shifts) {
+
+            /* ================= DAY CHECK (Recurring Only) ================= */
+
+            const isRecurringValid =
+                shift.type === "Recurring" &&
+                (!shift.daysActive?.length || shift.daysActive.includes(selectedDay)) &&
+                (!shift.startDate || !selectedDate.isBefore(moment(shift.startDate), "day")) &&
+                (shift.isIndefinite ||
+                    !shift.endDate ||
+                    !selectedDate.isAfter(moment(shift.endDate), "day"));
+
+            const isSpecialValid =
+                shift.type === "Special" &&
+                shift.startDate &&
+                !selectedDate.isBefore(moment(shift.startDate), "day") &&
+                (!shift.endDate ||
+                    !selectedDate.isAfter(moment(shift.endDate), "day"));
+
+            if (!isRecurringValid && !isSpecialValid) {
+                continue;
+            }
+            /* ================= DATE RANGE CHECK ================= */
+
+            if (shift.startDate && selectedDate.isBefore(moment(shift.startDate), "day")) {
+                continue;
+            }
+
+            if (!shift.isIndefinite && shift.endDate &&
+                selectedDate.isAfter(moment(shift.endDate), "day")) {
+                continue;
+            }
+
+            /* ================= ADVANCE BOOKING WINDOW ================= */
+
+            if (shift.advanceBookingWindow) {
+                const maxAllowedDate = now.clone().add(shift.advanceBookingWindow, "days");
+                if (selectedDate.isAfter(maxAllowedDate, "day")) {
+                    continue;
+                }
+            }
+
+            /* ================= DURATION LOGIC ================= */
+
+            let duration = shift.duration;
+
+            if (!shift.sameDurationForAll && shift.durationByPartySize?.length) {
+                const rule = shift.durationByPartySize.find(r => {
+                    const [min, max] = r.range.split("-").map(Number);
+                    return partySize >= min && partySize <= max;
+                });
+                if (rule) duration = rule.duration;
+            }
+
+            if (!duration) continue;
+
+            /* ================= SLOT GENERATION ================= */
+
+            let shiftSlots = [];
+
+            let start = moment(
+                `${date} ${shift.startTime}`,
+                "YYYY-MM-DD HH:mm"
+            );
+
+            let end = moment(
+                `${date} ${shift.endTime}`,
+                "YYYY-MM-DD HH:mm"
+            );
+
+            while (
+                start.clone().add(duration + shift.bufferTime, "minutes")
+                    .isSameOrBefore(end)
+            ) {
+
+                /* ---------- Lead Time Check ---------- */
+                if (shift.leadTime) {
+                    const minAllowedTime = now.clone().add(shift.leadTime, "minutes");
+                    if (start.isBefore(minAllowedTime)) {
+                        start.add(shift.slotInterval, "minutes");
+                        continue;
+                    }
+                }
+
+                shiftSlots.push({
+                    startTime: start.format("HH:mm"),                 // 24H format
+                    // startTime: start.format("hh:mm A"),            // 12H format
+                    // endTime: start.clone().add(duration, "minutes").format("hh:mm A")
+                });
+
+                start.add(shift.slotInterval, "minutes");
+            }
+
+            if (shiftSlots.length > 0) {
+                groupedSlots.push({
+                    shiftId: shift._id,
+                    shiftName: shift.name,
+                    shiftType: shift.type,
+                    slots: shiftSlots
+                });
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            restaurantId,
+            date,
+            totalShifts: groupedSlots.length,
+            data: groupedSlots
+        });
+
+    } catch (error) {
+        console.error("Restaurant slot generation error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error generating restaurant slots",
+            error: error.message
+        });
+    }
+};

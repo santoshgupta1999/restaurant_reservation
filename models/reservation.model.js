@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const Counter = require('./Counter');
 
 const reservationSchema = new mongoose.Schema({
     restaurantId: {
@@ -17,6 +18,11 @@ const reservationSchema = new mongoose.Schema({
     shiftId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Shift"
+    },
+    reservationNo: {
+        type: String,
+        unique: true,
+        index: true
     },
     date: {
         type: Date,
@@ -70,6 +76,30 @@ reservationSchema.pre("save", function (next) {
         return next(new Error("Finished reservation cannot be modified."));
     }
     next();
+});
+
+reservationSchema.pre("save", async function (next) {
+
+    if (!this.isNew || this.reservationNo) {
+        return next();
+    }
+
+    try {
+
+        const counter = await Counter.findOneAndUpdate(
+            { name: "reservation_no" },
+            { $inc: { seq: 1 } },
+            { new: true, upsert: true }
+        );
+
+        this.reservationNo = `RES-${String(counter.seq).padStart(4, "0")}`;
+
+        next();
+
+    } catch (err) {
+        next(err);
+    }
+
 });
 
 module.exports = mongoose.model("Reservation", reservationSchema);

@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const mongoose = require('mongoose');
 const BlacklistToken = require("../models/blacklistToken.model");
+const crypto = require("crypto");
 
 
 exports.register = async (req, res) => {

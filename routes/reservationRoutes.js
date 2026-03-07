@@ -26,6 +26,9 @@ router.put('/update/:id',
 router.delete('/:id', reservController.deleteReservationById);
 router.post('/status/:id', reservController.updateReservationStatus);
 
+router.post('/widget-booking/:restaurantId', reservController.createWidgetReservation);
+router.get('/confirmation/:reservationId', reservController.getReservationConfirmation);
+
 // router.post("/getDashboardOverview", reservController.dashboardSummary)
 // router.post("/bookingStats", reservController.bookingStats)
 // router.post("/bookingTrend24h", reservController.bookingTrend24h)

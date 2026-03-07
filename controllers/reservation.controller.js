@@ -26,6 +26,7 @@ exports.createReservation = async (req, res) => {
             lastName,
             guestEmail,
             guestPhone,
+            countryCode,
             gender,
             dob,
 
@@ -218,6 +219,7 @@ exports.createReservation = async (req, res) => {
             guest.firstName = firstName || guest.firstName;
             guest.lastName = lastName || guest.lastName;
             guest.phone = guestPhone || guest.phone;
+            guest.countryCode = countryCode || guest.countryCode;
             guest.email = guestEmail || guest.email;
             guest.gender = gender || guest.gender;
             guest.dob = dob || guest.dob;
@@ -229,6 +231,7 @@ exports.createReservation = async (req, res) => {
                 firstName,
                 lastName,
                 phone: guestPhone,
+                countryCode,
                 email: guestEmail,
                 gender,
                 dob,
@@ -417,6 +420,7 @@ exports.getReservations = async (req, res) => {
                     gender
                     dob
                     email
+                    countryCode
                     phone
                     tags
                     notes
@@ -748,6 +752,395 @@ exports.deleteReservationById = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Error deleting reservation.",
+            error: error.message
+        });
+    }
+};
+
+exports.createWidgetReservation = async (req, res) => {
+    try {
+
+        const { restaurantId } = req.params;
+
+        const {
+            reservationId,
+            tableId,
+
+            firstName,
+            lastName,
+            guestEmail,
+            guestPhone,
+            countryCode,
+            gender,
+            dob,
+
+            date,
+            time,
+            partySize,
+            source,
+            status,
+            seating,
+            tags,
+            notes
+        } = req.body;
+
+        if (!restaurantId || !date || !time) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId, date & time are required."
+            });
+        }
+
+        const allowedSources = ["Online", "Walk-in", "Phone", "Email", "Remi"];
+
+        if (source && !allowedSources.includes(source)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid source type."
+            });
+        }
+
+        if (!partySize || partySize <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid partySize is required."
+            });
+        }
+
+        const reservationDate = new Date(date);
+
+        let existingReservation = null;
+
+        if (reservationId) {
+            existingReservation = await Reservation.findById(reservationId);
+            if (!existingReservation) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Reservation not found."
+                });
+            }
+        }
+
+        const shortDay = reservationDate.toLocaleDateString("en-US", {
+            weekday: "short"
+        });
+
+        const map = {
+            Mon: "Mo",
+            Tue: "Tu",
+            Wed: "We",
+            Thu: "Th",
+            Fri: "Fr",
+            Sat: "Sa",
+            Sun: "Su"
+        };
+
+        const weekdayName = map[shortDay];
+
+        const allShifts = await Shift.find({
+            restaurantId,
+            isActive: true,
+            $or: [
+                { type: "Recurring", daysActive: { $in: [weekdayName] } },
+                {
+                    type: "Special",
+                    startDate: { $lte: reservationDate },
+                    endDate: { $gte: reservationDate }
+                }
+            ]
+        });
+
+        if (!allShifts.length) {
+            return res.status(400).json({
+                success: false,
+                message: "No shifts available for this day."
+            });
+        }
+
+        const [hh, mm] = time.split(":").map(Number);
+        const reservationMinutes = hh * 60 + mm;
+
+        const convertToMinutes = t => {
+            const [h, m] = t.split(":").map(Number);
+            return h * 60 + m;
+        };
+
+        let shift = allShifts.find(s => {
+            const start = convertToMinutes(s.startTime);
+            const end = convertToMinutes(s.endTime);
+            return reservationMinutes >= start && reservationMinutes < end;
+        });
+
+        if (!shift) {
+            return res.status(400).json({
+                success: false,
+                message: "Reservation time is outside all shift timings."
+            });
+        }
+
+        if (tableId) {
+            const table = await Table.findById(tableId);
+
+            // if (!table) {
+            //     return res.status(404).json({
+            //         success: false,
+            //         message: "Table not found."
+            //     });
+            // }
+
+            if (table.status === "OutOfService") {
+                return res.status(400).json({
+                    success: false,
+                    message: "This table is currently locked (Out of Service). Please choose another table."
+                });
+            }
+
+            if (partySize > table.capacity) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Party size exceeds table capacity."
+                });
+            }
+        }
+
+        if (tableId) {
+            const existingBooking = await Reservation.findOne({
+                restaurantId,
+                tableId,
+                date: reservationDate,
+                time,
+                status: { $in: ["Pending", "Confirmed", "Seated"] },
+                _id: { $ne: reservationId }
+            });
+
+            if (existingBooking) {
+                return res.status(400).json({
+                    success: false,
+                    message: "This table is already booked for selected time."
+                });
+            }
+        }
+
+        const conflictingBlock = await Block.findOne({
+            restaurantId,
+            status: "Active",
+            isExpired: false,
+            startDate: { $lte: reservationDate },
+            endDate: { $gte: reservationDate },
+            $or: [
+                { isFullRestaurantBlock: true },
+                tableId ? { tableIds: tableId } : {},
+                shift ? { shiftIds: shift._id } : {}
+            ]
+        });
+
+        if (conflictingBlock) {
+            return res.status(400).json({
+                success: false,
+                message: `This table is not available from ${conflictingBlock.startDate.toDateString()} to ${conflictingBlock.endDate.toDateString()}. Please choose another table.`,
+                block: {
+                    reason: conflictingBlock.reason,
+                    startDate: conflictingBlock.startDate,
+                    endDate: conflictingBlock.endDate
+                }
+            });
+        }
+
+        let guest = null;
+
+        if (guestPhone) {
+            guest = await Guest.findOne({ restaurantId, phone: guestPhone });
+        }
+
+        if (!guest && guestEmail) {
+            guest = await Guest.findOne({
+                restaurantId,
+                email: guestEmail.toLowerCase()
+            });
+        }
+
+        if (guest) {
+            guest.firstName = firstName || guest.firstName;
+            guest.lastName = lastName || guest.lastName;
+            guest.phone = guestPhone || guest.phone;
+            guest.countryCode = countryCode || guest.countryCode;
+            guest.email = guestEmail || guest.email;
+            guest.gender = gender || guest.gender;
+            guest.dob = dob || guest.dob;
+
+            await guest.save();
+        } else {
+            guest = await Guest.create({
+                restaurantId,
+                firstName,
+                lastName,
+                phone: guestPhone,
+                countryCode,
+                email: guestEmail,
+                gender,
+                dob,
+                tags,
+                notes
+            });
+        }
+
+        let statusChanged = false;
+        let reservation;
+
+        if (existingReservation) {
+
+            if (existingReservation.status === "Finished") {
+                return res.status(400).json({
+                    success: false,
+                    message: "Finished reservation cannot be modified."
+                });
+            }
+            if (status && existingReservation.status !== status) {
+                statusChanged = true;
+            }
+            // UPDATE
+            existingReservation.tableId = tableId || existingReservation.tableId;
+            existingReservation.shiftId = shift._id;
+            existingReservation.date = reservationDate;
+            existingReservation.time = time;
+            existingReservation.partySize = partySize;
+            existingReservation.source = source;
+            existingReservation.status = status;
+            existingReservation.seating = seating;
+            existingReservation.tags = tags;
+            existingReservation.notes = notes;
+
+            reservation = await existingReservation.save();
+
+        } else {
+            // CREATE
+            reservation = await Reservation.create({
+                restaurantId,
+                guestId: guest._id,
+                tableId,
+                shiftId: shift._id,
+                date: reservationDate,
+                time,
+                partySize,
+                source,
+                status,
+                seating,
+                tags,
+                notes
+            });
+
+            if (["Confirmed", "Cancelled"].includes(reservation.status)) {
+                statusChanged = true;
+            }
+        }
+
+        await Guest.findByIdAndUpdate(guest._id, {
+            upcomingVisitAt: reservationDate
+        });
+
+        if (
+            statusChanged &&
+            ["Confirmed", "Cancelled"].includes(reservation.status)
+        ) {
+            sendReservationNotification(
+                reservation,
+                guest,
+                reservation.status
+            ).catch(console.error);
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: reservationId
+                ? "Reservation updated successfully."
+                : "Reservation created successfully.",
+            data: reservation
+        });
+
+    } catch (error) {
+        console.error("Error saving reservation:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error saving reservation.",
+            error: error.message
+        });
+    }
+};
+
+exports.getReservationConfirmation = async (req, res) => {
+    try {
+
+        const { reservationId } = req.params;
+
+        const reservation = await Reservation.findById(reservationId)
+            .populate("guestId")
+            .populate("restaurantId")
+            .populate("tableId");
+
+        if (!reservation) {
+            return res.status(404).json({
+                success: false,
+                message: "Reservation not found"
+            });
+        }
+
+        const guest = reservation.guestId;
+        const restaurant = reservation.restaurantId;
+
+        const logoUrl = restaurant?.heroImage
+            ? `/uploads/restaurants/logo/${restaurant.heroImage}`
+            : null;
+
+        const response = {
+
+            guest: {
+                firstName: guest?.firstName,
+                lastName: guest?.lastName,
+                phone: guest?.phone,
+                email: guest?.email
+            },
+
+            booking: {
+                reservationNo: reservation.reservationNo,
+                date: reservation.date,
+                time: reservation.time,
+                partySize: reservation.partySize,
+                status: reservation.status
+            },
+
+            restaurant: {
+                name: restaurant?.venueName,
+                address: restaurant?.city,
+                phone: restaurant?.phone,
+                website: restaurant?.website,
+                logo: logoUrl
+            },
+
+            table: {
+                tableNumber: reservation.tableId?.tableNumber
+            },
+
+            // shareLink: `https://remi.com/${restaurant?.slug || "restaurant"}`,
+
+            calendar: {
+                title: `Reservation at ${restaurant?.venueName}`,
+                date: reservation.date,
+                time: reservation.time
+            }
+        };
+
+        return res.status(200).json({
+            success: true,
+            message: "Reservation confirmation fetched successfully",
+            data: response
+        });
+
+    } catch (error) {
+        console.error("Error fetching reservation confirmation:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Server error",
             error: error.message
         });
     }

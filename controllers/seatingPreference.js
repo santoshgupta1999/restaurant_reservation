@@ -1,5 +1,6 @@
 const SeatingPreference = require("../models/SeatingPreference");
 const StaffAccount = require("../models/staffAccount");
+const Room = require('../models/room.model');
 const bcrypt = require("bcrypt");
 
 // exports.addSeatingPreference = async (req, res) => {
@@ -487,6 +488,43 @@ exports.getAllStaff = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: error.message || "Internal server error"
+        });
+    }
+};
+
+exports.getRoomsByRestaurant = async (req, res) => {
+    try {
+        const { restaurantId } = req.params;
+
+        if (!restaurantId) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId is required"
+            });
+        }
+
+        const rooms = await Room.find(
+            { restaurantId, isActive: true },
+            { _id: 1, name: 1 }
+        ).sort({ name: 1 }).lean();
+
+        const formatted = rooms.map(room => ({
+            id: room._id,
+            name: room.name
+        }));
+
+        return res.status(200).json({
+            success: true,
+            data: formatted
+        });
+
+    } catch (error) {
+        console.error("Error fetching room dropdown:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching rooms",
+            error: error.message
         });
     }
 };

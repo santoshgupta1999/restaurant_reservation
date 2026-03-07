@@ -72,6 +72,7 @@ router.get('/getShiftsCalendarView', restaurantController.getShiftsCalendarView)
 router.post("/updateShiftStatus/:id", restaurantController.updateShiftStatus);
 
 router.post("/getRestaurantSlots", restaurantController.getRestaurantSlots);
+router.post("/get-widget-slots/:restaurantId", restaurantController.getWidgetRestaurantSlots);
 
 // -------------------------------- Preference -------------------------
 
@@ -83,5 +84,7 @@ router.post("/getAllPreference", seatingPreference.getAllPreference);
 router.post("/addStaff", seatingPreference.saveStaffAccount);
 router.delete("/deleteStaff", seatingPreference.deleteStaff);
 router.post("/getAllStaff", seatingPreference.getAllStaff);
+
+router.post("/getRooms/:restaurantId", seatingPreference.getRoomsByRestaurant);
 
 module.exports = router;

@@ -28,6 +28,10 @@ const guestSchema = new mongoose.Schema(
         },
         email: { type: String },
         phone: { type: String },
+        countryCode: {
+            type: String,
+            default: "+1"
+        },
         notes: { type: String },
         tags: [
             {
