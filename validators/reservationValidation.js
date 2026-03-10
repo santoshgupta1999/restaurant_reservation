@@ -43,7 +43,8 @@ exports.reservationValidator = [
 
     body("time")
         .notEmpty().withMessage("Time is required.")
-        .matches(/^([01]\d|2[0-3]):([0-5]\d)$/).withMessage("Invalid time format (HH:mm)."),
+        .matches(/^(([01]\d|2[0-3]):([0-5]\d))$|^((0?[1-9]|1[0-2]):[0-5][0-9]\s?(AM|PM))$/i)
+        .withMessage("Invalid time format. Use HH:mm or hh:mm AM/PM"),
 
     body("partySize")
         .isInt({ min: 1 }).withMessage("Party size must be at least 1."),

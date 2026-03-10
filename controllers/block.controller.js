@@ -196,6 +196,20 @@ const Shift = require("../models/shift.model");
 //     }
 // };
 
+function convertTo12Hour(time) {
+    if (!time) return time;
+
+    const [hours, minutes] = time.split(":");
+    let h = parseInt(hours, 10);
+
+    const ampm = h >= 12 ? "PM" : "AM";
+
+    h = h % 12;
+    if (h === 0) h = 12;
+
+    return `${h.toString().padStart(2, "0")}:${minutes} ${ampm}`;
+}
+
 exports.createBlock = async (req, res) => {
     try {
         const {
@@ -464,6 +478,20 @@ exports.getAllBlocks = async (req, res) => {
                     .toISOString()
                     .split("T")[0];
             }
+
+            // if (obj.shiftIds && obj.shiftIds.length) {
+            //     obj.shiftIds = obj.shiftIds.map(shift => {
+            //         if (shift.startTime) {
+            //             shift.startTime = convertTo12Hour(shift.startTime);
+            //         }
+
+            //         if (shift.endTime) {
+            //             shift.endTime = convertTo12Hour(shift.endTime);
+            //         }
+
+            //         return shift;
+            //     });
+            // }
 
             return obj;
         };

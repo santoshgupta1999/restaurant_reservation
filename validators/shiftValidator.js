@@ -16,13 +16,12 @@ exports.shiftValidator = [
 
     body("startTime")
         .notEmpty().withMessage("Start time is required.")
-        .matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
-        .withMessage("Invalid time format (HH:mm)."),
+        .matches(/^((0?[1-9]|1[0-2]):[0-5][0-9]\s?(AM|PM))$/i)
+        .withMessage("Invalid time format (hh:mm AM/PM)"),
 
     body("endTime")
-        .notEmpty().withMessage("End time is required.")
-        .matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
-        .withMessage("Invalid time format (HH:mm)."),
+        .matches(/^((0?[1-9]|1[0-2]):[0-5][0-9]\s?(AM|PM))$/i)
+        .withMessage("Invalid time format (hh:mm AM/PM)"),
 
     body("daysActive")
         .optional()
@@ -43,13 +42,19 @@ exports.shiftValidator = [
         .withMessage("Invalid startDate format."),
 
     body("endDate")
-        .optional()
-        .isISO8601().toDate()
+        .optional({ nullable: true })
+        .isISO8601()
         .withMessage("Invalid endDate format.")
         .custom((endDate, { req }) => {
-            if (req.body.startDate && new Date(endDate) < new Date(req.body.startDate)) {
+
+            if (req.body.isIndefinite === true && endDate) {
+                throw new Error("endDate is not allowed when shift is indefinite.");
+            }
+
+            if (endDate && req.body.startDate && new Date(endDate) < new Date(req.body.startDate)) {
                 throw new Error("endDate must be after startDate.");
             }
+
             return true;
         }),
 

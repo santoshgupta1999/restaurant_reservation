@@ -15,6 +15,42 @@ const { sendReservationNotification } = require("../utils/reservationNotificatio
 //     return days[date.getDay()];
 // };
 
+function convertTo24Hour(time) {
+
+    if (!time) return time;
+
+    if (!time.toUpperCase().includes("AM") && !time.toUpperCase().includes("PM")) {
+        return time; // already 24H
+    }
+
+    const [timePart, modifier] = time.split(" ");
+    let [hours, minutes] = timePart.split(":");
+
+    if (modifier.toUpperCase() === "PM" && hours !== "12") {
+        hours = parseInt(hours, 10) + 12;
+    }
+
+    if (modifier.toUpperCase() === "AM" && hours === "12") {
+        hours = "00";
+    }
+
+    return `${hours.toString().padStart(2, "0")}:${minutes}`;
+}
+
+function convertTo12Hour(time) {
+    if (!time) return time;
+
+    const [hours, minutes] = time.split(":");
+    let h = parseInt(hours, 10);
+
+    const ampm = h >= 12 ? "PM" : "AM";
+
+    h = h % 12;
+    if (h === 0) h = 12;
+
+    return `${h.toString().padStart(2, "0")}:${minutes} ${ampm}`;
+}
+
 exports.createReservation = async (req, res) => {
     try {
         const {
@@ -64,7 +100,7 @@ exports.createReservation = async (req, res) => {
         }
 
         const reservationDate = new Date(date);
-
+        let formattedTime = convertTo24Hour(time);
         let existingReservation = null;
 
         if (reservationId) {
@@ -113,7 +149,7 @@ exports.createReservation = async (req, res) => {
             });
         }
 
-        const [hh, mm] = time.split(":").map(Number);
+        const [hh, mm] = formattedTime.split(":").map(Number);
         const reservationMinutes = hh * 60 + mm;
 
         const convertToMinutes = t => {
@@ -245,10 +281,10 @@ exports.createReservation = async (req, res) => {
 
         if (existingReservation) {
 
-            if (existingReservation.status === "Finished") {
+            if (["Finished", "No-show", "Cancelled"].includes(existingReservation.status)) {
                 return res.status(400).json({
                     success: false,
-                    message: "Finished reservation cannot be modified."
+                    message: `${existingReservation.status} reservation cannot be modified.`
                 });
             }
             if (status && existingReservation.status !== status) {
@@ -258,7 +294,7 @@ exports.createReservation = async (req, res) => {
             existingReservation.tableId = tableId || existingReservation.tableId;
             existingReservation.shiftId = shift._id;
             existingReservation.date = reservationDate;
-            existingReservation.time = time;
+            existingReservation.time = formattedTime;
             existingReservation.partySize = partySize;
             existingReservation.source = source;
             existingReservation.status = status;
@@ -276,7 +312,7 @@ exports.createReservation = async (req, res) => {
                 tableId,
                 shiftId: shift._id,
                 date: reservationDate,
-                time,
+                time: formattedTime,
                 partySize,
                 source,
                 status,
@@ -454,6 +490,22 @@ exports.getReservations = async (req, res) => {
             obj.date = trimDate(obj.date);
             obj.createdAt = trimDate(obj.createdAt);
             obj.updatedAt = trimDate(obj.updatedAt);
+
+            /* Convert reservation time */
+            if (obj.time) {
+                obj.time = convertTo12Hour(obj.time);
+            }
+
+            /* Shift time */
+            if (obj.shiftId) {
+                if (obj.shiftId.startTime) {
+                    obj.shiftId.startTime = convertTo12Hour(obj.shiftId.startTime);
+                }
+
+                if (obj.shiftId.endTime) {
+                    obj.shiftId.endTime = convertTo12Hour(obj.shiftId.endTime);
+                }
+            }
 
             /* Guest dates */
             if (obj.guestId) {
@@ -808,7 +860,7 @@ exports.createWidgetReservation = async (req, res) => {
         }
 
         const reservationDate = new Date(date);
-
+        let formattedTime = convertTo24Hour(time);
         let existingReservation = null;
 
         if (reservationId) {
@@ -857,7 +909,7 @@ exports.createWidgetReservation = async (req, res) => {
             });
         }
 
-        const [hh, mm] = time.split(":").map(Number);
+        const [hh, mm] = formattedTime.split(":").map(Number);
         const reservationMinutes = hh * 60 + mm;
 
         const convertToMinutes = t => {
@@ -989,10 +1041,10 @@ exports.createWidgetReservation = async (req, res) => {
 
         if (existingReservation) {
 
-            if (existingReservation.status === "Finished") {
+            if (["Finished", "No-show", "Cancelled"].includes(existingReservation.status)) {
                 return res.status(400).json({
                     success: false,
-                    message: "Finished reservation cannot be modified."
+                    message: `${existingReservation.status} reservation cannot be modified.`
                 });
             }
             if (status && existingReservation.status !== status) {
@@ -1002,7 +1054,7 @@ exports.createWidgetReservation = async (req, res) => {
             existingReservation.tableId = tableId || existingReservation.tableId;
             existingReservation.shiftId = shift._id;
             existingReservation.date = reservationDate;
-            existingReservation.time = time;
+            existingReservation.time = formattedTime;
             existingReservation.partySize = partySize;
             existingReservation.source = source;
             existingReservation.status = status;
@@ -1020,7 +1072,7 @@ exports.createWidgetReservation = async (req, res) => {
                 tableId,
                 shiftId: shift._id,
                 date: reservationDate,
-                time,
+                time: formattedTime,
                 partySize,
                 source,
                 status,

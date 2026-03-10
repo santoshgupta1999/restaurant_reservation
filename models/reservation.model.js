@@ -61,22 +61,6 @@ const reservationSchema = new mongoose.Schema({
     notes: String
 }, { timestamps: true });
 
-reservationSchema.pre("findOneAndUpdate", async function (next) {
-    const doc = await this.model.findOne(this.getQuery());
-
-    if (doc && doc.status === "Finished") {
-        return next(new Error("Finished reservation cannot be modified."));
-    }
-
-    next();
-});
-
-reservationSchema.pre("save", function (next) {
-    if (!this.isNew && this.status === "Finished") {
-        return next(new Error("Finished reservation cannot be modified."));
-    }
-    next();
-});
 
 reservationSchema.pre("save", async function (next) {
 

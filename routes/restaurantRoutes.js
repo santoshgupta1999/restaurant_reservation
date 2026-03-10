@@ -74,6 +74,8 @@ router.post("/updateShiftStatus/:id", restaurantController.updateShiftStatus);
 router.post("/getRestaurantSlots", restaurantController.getRestaurantSlots);
 router.post("/get-widget-slots/:restaurantId", restaurantController.getWidgetRestaurantSlots);
 
+router.post("/shift-names/:restaurantId", restaurantController.getShiftNamesByRestaurant);
+
 // -------------------------------- Preference -------------------------
 
 router.post("/addPreference", seatingPreference.addSeatingPreference);

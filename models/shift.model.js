@@ -7,8 +7,8 @@ const shiftSchema = new mongoose.Schema(
         type: { type: String, enum: ["Recurring", "Special"], default: "Recurring" },
 
         startDate: { type: Date },
-        endDate: { type: Date },
-        isIndefinite: { type: Boolean, default: false },
+        endDate: { type: Date, default: null },
+        isIndefinite: { type: Boolean, },
 
         daysActive: [{ type: String }],
 
@@ -20,7 +20,7 @@ const shiftSchema = new mongoose.Schema(
         leadTime: { type: Number, default: 0 },
         advanceBookingWindow: { type: Number, default: 0 },
         minPartySize: { type: Number, default: 1 },
-        maxPartySize: { type: Number, default: 20 },
+        maxPartySize: { type: Number, default: 40 },
         bufferTime: { type: Number, default: 15 },
         sameDurationForAll: { type: Boolean, default: true },
         duration: { type: Number },

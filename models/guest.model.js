@@ -1,6 +1,11 @@
 const mongoose = require("mongoose");
 const Counter = require("./Counter");
 
+function capitalize(value) {
+    if (!value) return value;
+    return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+}
+
 const guestSchema = new mongoose.Schema(
     {
         remiId: {
@@ -14,9 +19,9 @@ const guestSchema = new mongoose.Schema(
             ref: "Restaurant",
             required: true
         },
-        firstName: { type: String, required: true },
-        lastName: { type: String },
-        gender: { type: String, enum: ["Male", "Female", "Other", "Prefer not to say"], default: "Prefer not to say" },
+        firstName: { type: String, required: true, set: capitalize },
+        lastName: { type: String, set: capitalize },
+        gender: { type: String, enum: ["Male", "Female", "Other", "N/A"], default: "N/A" },
         dob: { type: Date },
         anniversary: { type: Date },
         secondaryEmail: { type: String },

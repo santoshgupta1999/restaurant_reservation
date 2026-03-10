@@ -715,6 +715,35 @@ exports.updateRestaurantStatus = async (req, res) => {
 };
 
 // -------------------------------------------- Shift -------------------------------------------- //
+function convertTo24Hour(time12h) {
+    if (!time12h) return time12h;
+
+    const [time, modifier] = time12h.split(" ");
+    let [hours, minutes] = time.split(":");
+
+    if (modifier === "PM" && hours !== "12") {
+        hours = parseInt(hours, 10) + 12;
+    }
+
+    if (modifier === "AM" && hours === "12") {
+        hours = "00";
+    }
+
+    return `${hours.toString().padStart(2, "0")}:${minutes}`;
+}
+
+function convertTo12Hour(time) {
+    if (!time) return time;
+
+    const [hours, minutes] = time.split(":");
+    let h = parseInt(hours, 10);
+    const ampm = h >= 12 ? "PM" : "AM";
+
+    h = h % 12;
+    if (h === 0) h = 12;
+
+    return `${h.toString().padStart(2, "0")}:${minutes} ${ampm}`;
+}
 
 exports.createShift = async (req, res) => {
     try {
@@ -729,6 +758,23 @@ exports.createShift = async (req, res) => {
         }
 
         let payload = { ...req.body };
+
+        if (payload.startTime) {
+            payload.startTime = convertTo24Hour(payload.startTime);
+        }
+
+        if (payload.endTime) {
+            payload.endTime = convertTo24Hour(payload.endTime);
+        }
+
+        if (payload.lastBookableTime) {
+            payload.lastBookableTime = convertTo24Hour(payload.lastBookableTime);
+        }
+
+        if (payload.isIndefinite) {
+            payload.endDate = null;
+        }
+
         const shiftId = payload.id || payload._id;
 
         delete payload.id;
@@ -760,6 +806,30 @@ exports.createShift = async (req, res) => {
                 return res.status(404).json({
                     success: false,
                     message: "Shift not found"
+                });
+            }
+
+            /* ================= OVERLAP CHECK ================= */
+
+            const { restaurantId, startDate, startTime, endTime } = payload;
+
+            const overlapQuery = {
+                restaurantId,
+                startDate,
+                startTime: { $lt: endTime },
+                endTime: { $gt: startTime }
+            };
+
+            if (shiftId) {
+                overlapQuery._id = { $ne: shiftId };
+            }
+
+            const overlappingShift = await Shift.findOne(overlapQuery);
+
+            if (overlappingShift) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Shift overlaps with an existing shift"
                 });
             }
 
@@ -811,11 +881,8 @@ exports.getAllShift = async (req, res) => {
 
         const shiftsRaw = await Shift.find(query)
             .populate("restaurantId", "name email phone address")
-            .sort({ createdAt: -1 });
+            .sort({ isActive: -1, startTime: 1 });
 
-        /* ===============================
-           DATE TRIM FUNCTION
-        =============================== */
         const formatShiftDates = (shift) => {
             const obj = shift.toObject();
 
@@ -842,6 +909,18 @@ exports.getAllShift = async (req, res) => {
                     .toISOString()
                     .split("T")[0];
             }
+
+            // if (obj.startTime) {
+            //     obj.startTime = convertTo12Hour(obj.startTime);
+            // }
+
+            // if (obj.endTime) {
+            //     obj.endTime = convertTo12Hour(obj.endTime);
+            // }
+
+            // if (obj.lastBookableTime) {
+            //     obj.lastBookableTime = convertTo12Hour(obj.lastBookableTime);
+            // }
 
             return obj;
         };
@@ -1264,10 +1343,41 @@ exports.getRestaurantSlots = async (req, res) => {
                 "YYYY-MM-DD HH:mm"
             );
 
+            const shiftEndTime = moment(`${date} ${shift.endTime}`, "YYYY-MM-DD HH:mm");
+
+            if (selectedDate.isSame(now, "day") && shiftEndTime.isBefore(now)) {
+                continue;
+            }
+
             while (
                 start.clone().add(duration + shift.bufferTime, "minutes")
                     .isSameOrBefore(end)
             ) {
+
+                const slotTime = start.clone();
+
+                /* ---------- Skip Past Slots If Today ---------- */
+                if (selectedDate.isSame(now, "day") && slotTime.isBefore(now)) {
+                    start.add(shift.slotInterval, "minutes");
+                    continue;
+                }
+
+                /* ---------- Lead Time Check ---------- */
+                if (shift.leadTime) {
+                    const minAllowedTime = now.clone().add(shift.leadTime, "minutes");
+
+                    if (slotTime.isBefore(minAllowedTime)) {
+                        start.add(shift.slotInterval, "minutes");
+                        continue;
+                    }
+                }
+
+                shiftSlots.push({
+                    startTime: slotTime.format("hh:mm A")
+                });
+
+                start.add(shift.slotInterval, "minutes");
+            } {
 
                 /* ---------- Lead Time Check ---------- */
                 if (shift.leadTime) {
@@ -1279,8 +1389,8 @@ exports.getRestaurantSlots = async (req, res) => {
                 }
 
                 shiftSlots.push({
-                    startTime: start.format("HH:mm"),                 // 24H format
-                    // startTime: start.format("hh:mm A"),            // 12H format
+                    // startTime: start.format("HH:mm"),                 // 24H format
+                    startTime: start.format("hh:mm A"),            // 12H format
                     // endTime: start.clone().add(duration, "minutes").format("hh:mm A")
                 });
 
@@ -1641,10 +1751,41 @@ exports.getWidgetRestaurantSlots = async (req, res) => {
                 "YYYY-MM-DD HH:mm"
             );
 
+            const shiftEndTime = moment(`${date} ${shift.endTime}`, "YYYY-MM-DD HH:mm");
+
+            if (selectedDate.isSame(now, "day") && shiftEndTime.isBefore(now)) {
+                continue;
+            }
+
             while (
                 start.clone().add(duration + shift.bufferTime, "minutes")
                     .isSameOrBefore(end)
             ) {
+
+                const slotTime = start.clone();
+
+                /* ---------- Skip Past Slots If Today ---------- */
+                if (selectedDate.isSame(now, "day") && slotTime.isBefore(now)) {
+                    start.add(shift.slotInterval, "minutes");
+                    continue;
+                }
+
+                /* ---------- Lead Time Check ---------- */
+                if (shift.leadTime) {
+                    const minAllowedTime = now.clone().add(shift.leadTime, "minutes");
+
+                    if (slotTime.isBefore(minAllowedTime)) {
+                        start.add(shift.slotInterval, "minutes");
+                        continue;
+                    }
+                }
+
+                shiftSlots.push({
+                    startTime: slotTime.format("hh:mm A")
+                });
+
+                start.add(shift.slotInterval, "minutes");
+            } {
 
                 /* ---------- Lead Time Check ---------- */
                 if (shift.leadTime) {
@@ -1656,8 +1797,8 @@ exports.getWidgetRestaurantSlots = async (req, res) => {
                 }
 
                 shiftSlots.push({
-                    startTime: start.format("HH:mm"),                 // 24H format
-                    // startTime: start.format("hh:mm A"),            // 12H format
+                    // startTime: start.format("HH:mm"),                 // 24H format
+                    startTime: start.format("hh:mm A"),            // 12H format
                     // endTime: start.clone().add(duration, "minutes").format("hh:mm A")
                 });
 
@@ -1687,6 +1828,47 @@ exports.getWidgetRestaurantSlots = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Error generating restaurant slots",
+            error: error.message
+        });
+    }
+};
+
+exports.getShiftNamesByRestaurant = async (req, res) => {
+    try {
+        const { restaurantId } = req.params;
+
+        if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid restaurantId is required",
+            });
+        }
+
+        const shifts = await Shift.find(
+            { restaurantId, isActive: true },
+            { name: 1 }
+        )
+            .sort({ name: 1 })
+            .lean();
+
+        const shiftNames = shifts.map(s => ({
+            _id: s._id,
+            name: s.name
+        }));
+
+        return res.status(200).json({
+            success: true,
+            message: "Shift names fetched successfully",
+            count: shiftNames.length,
+            data: shiftNames
+        });
+
+    } catch (error) {
+        console.error("Error fetching shift names:", error.message);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
             error: error.message
         });
     }
