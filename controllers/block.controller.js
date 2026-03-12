@@ -479,19 +479,19 @@ exports.getAllBlocks = async (req, res) => {
                     .split("T")[0];
             }
 
-            // if (obj.shiftIds && obj.shiftIds.length) {
-            //     obj.shiftIds = obj.shiftIds.map(shift => {
-            //         if (shift.startTime) {
-            //             shift.startTime = convertTo12Hour(shift.startTime);
-            //         }
+            if (obj.shiftIds && obj.shiftIds.length) {
+                obj.shiftIds = obj.shiftIds.map(shift => {
+                    if (shift.startTime) {
+                        shift.startTime = convertTo12Hour(shift.startTime);
+                    }
 
-            //         if (shift.endTime) {
-            //             shift.endTime = convertTo12Hour(shift.endTime);
-            //         }
+                    if (shift.endTime) {
+                        shift.endTime = convertTo12Hour(shift.endTime);
+                    }
 
-            //         return shift;
-            //     });
-            // }
+                    return shift;
+                });
+            }
 
             return obj;
         };
@@ -522,15 +522,44 @@ exports.getBlockById = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const block = await Block.findById(id)
+        const blockRaw = await Block.findById(id)
             .populate("restaurantId", "name")
             .populate("tableIds", "tableNumber roomName capacity")
             .populate("shiftIds", "name startTime endTime startDate endDate");
 
-        if (!block) {
+        if (!blockRaw) {
             return res.status(404).json({
                 success: false,
                 message: "Block not found"
+            });
+        }
+
+        const block = blockRaw.toObject();
+
+        /* ===== DATE FORMAT ===== */
+        const trimDate = (val) =>
+            val ? new Date(val).toISOString().split("T")[0] : null;
+
+        block.startDate = trimDate(block.startDate);
+        block.endDate = trimDate(block.endDate);
+        block.createdAt = trimDate(block.createdAt);
+        block.updatedAt = trimDate(block.updatedAt);
+
+        /* ===== SHIFT TIME FORMAT ===== */
+        if (block.shiftIds && block.shiftIds.length) {
+            block.shiftIds = block.shiftIds.map(shift => {
+                if (shift.startTime) {
+                    shift.startTime = convertTo12Hour(shift.startTime);
+                }
+
+                if (shift.endTime) {
+                    shift.endTime = convertTo12Hour(shift.endTime);
+                }
+
+                shift.startDate = trimDate(shift.startDate);
+                shift.endDate = trimDate(shift.endDate);
+
+                return shift;
             });
         }
 

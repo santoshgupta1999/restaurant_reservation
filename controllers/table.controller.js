@@ -1272,7 +1272,7 @@ exports.mergeTables = async (req, res) => {
 
 exports.unmergeTables = async (req, res) => {
     try {
-        const { tableId, force } = req.body; // force optional
+        const { tableId, force } = req.body;
 
         if (!tableId) {
             return res.status(400).json({
@@ -1286,37 +1286,68 @@ exports.unmergeTables = async (req, res) => {
         if (!table || !table.isJoined) {
             return res.status(404).json({
                 success: false,
-                message: "Table not found or not part of a merged group."
+                message: "Table not part of merged group."
             });
         }
 
-        // Get all joined tables
+        const groupIds = table.joinedWith.map(id => id.toString());
+
         const joinedTables = await Table.find({
-            _id: { $in: table.joinedWith }
+            _id: { $in: groupIds }
         });
 
-        // Check seated tables
+        /* Check seated tables */
         const seatedTables = joinedTables.filter(
-            (t) => t.status === "Seated"
+            t => t.status === "Seated"
         );
 
         if (seatedTables.length && !force) {
             return res.status(400).json({
                 success: false,
-                message: "Some tables are currently seated. Set force=true to override."
+                message: "Some tables are seated. Use force=true."
             });
         }
 
-        // Unmerge all tables
+        /* If center table removed (more than 2 tables in group) */
+        if (groupIds.length > 2 && tableId === groupIds[1]) {
+
+            await Table.updateMany(
+                { _id: { $in: groupIds } },
+                { $set: { isJoined: false, joinedWith: [] } }
+            );
+
+            return res.status(200).json({
+                success: true,
+                message: "Center table removed. All tables unmerged."
+            });
+        }
+
+        /* Remove selected table from group */
+        const remainingTables = groupIds.filter(
+            id => id !== tableId
+        );
+
+        /* Update remaining group */
         await Table.updateMany(
-            { _id: { $in: table.joinedWith } },
+            { _id: { $in: remainingTables } },
+            {
+                $set: {
+                    joinedWith: remainingTables,
+                    isJoined: remainingTables.length > 1
+                }
+            }
+        );
+
+        /* Update removed table */
+        await Table.updateOne(
+            { _id: tableId },
             { $set: { isJoined: false, joinedWith: [] } }
         );
 
         return res.status(200).json({
             success: true,
-            message: "Tables unmerged successfully.",
-            data: table.joinedWith
+            message: "Table unmerged successfully.",
+            remainingTables
         });
 
     } catch (error) {

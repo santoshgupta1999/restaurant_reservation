@@ -910,17 +910,17 @@ exports.getAllShift = async (req, res) => {
                     .split("T")[0];
             }
 
-            // if (obj.startTime) {
-            //     obj.startTime = convertTo12Hour(obj.startTime);
-            // }
+            if (obj.startTime) {
+                obj.startTime = convertTo12Hour(obj.startTime);
+            }
 
-            // if (obj.endTime) {
-            //     obj.endTime = convertTo12Hour(obj.endTime);
-            // }
+            if (obj.endTime) {
+                obj.endTime = convertTo12Hour(obj.endTime);
+            }
 
-            // if (obj.lastBookableTime) {
-            //     obj.lastBookableTime = convertTo12Hour(obj.lastBookableTime);
-            // }
+            if (obj.lastBookableTime) {
+                obj.lastBookableTime = convertTo12Hour(obj.lastBookableTime);
+            }
 
             return obj;
         };
@@ -956,14 +956,38 @@ exports.getShiftById = async (req, res) => {
             });
         }
 
-        const shift = await Shift.findById(id)
+        const shiftRaw = await Shift.findById(id)
             .populate("restaurantId", "name email phone");
 
-        if (!shift) {
+        if (!shiftRaw) {
             return res.status(404).json({
                 success: false,
                 message: "Shift not found"
             });
+        }
+
+        const shift = shiftRaw.toObject();
+
+        /* ===== DATE FORMAT ===== */
+        const trimDate = (val) =>
+            val ? new Date(val).toISOString().split("T")[0] : null;
+
+        shift.startDate = trimDate(shift.startDate);
+        shift.endDate = trimDate(shift.endDate);
+        shift.createdAt = trimDate(shift.createdAt);
+        shift.updatedAt = trimDate(shift.updatedAt);
+
+        /* ===== TIME FORMAT ===== */
+        if (shift.startTime) {
+            shift.startTime = convertTo12Hour(shift.startTime);
+        }
+
+        if (shift.endTime) {
+            shift.endTime = convertTo12Hour(shift.endTime);
+        }
+
+        if (shift.lastBookableTime) {
+            shift.lastBookableTime = convertTo12Hour(shift.lastBookableTime);
         }
 
         return res.status(200).json({
