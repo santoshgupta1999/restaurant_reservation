@@ -760,7 +760,7 @@ exports.updateReservationStatus = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: `Reservation status updated to ${status} successfully`,
+            message: `Reservation ${status} successfully`,
             data: updated,
         });
 
@@ -823,7 +823,6 @@ exports.createWidgetReservation = async (req, res) => {
             guestEmail,
             guestPhone,
             countryCode,
-            gender,
             dob,
 
             date,
@@ -1017,7 +1016,6 @@ exports.createWidgetReservation = async (req, res) => {
             guest.phone = guestPhone || guest.phone;
             guest.countryCode = countryCode || guest.countryCode;
             guest.email = guestEmail || guest.email;
-            guest.gender = gender || guest.gender;
             guest.dob = dob || guest.dob;
 
             await guest.save();
@@ -1029,7 +1027,6 @@ exports.createWidgetReservation = async (req, res) => {
                 phone: guestPhone,
                 countryCode,
                 email: guestEmail,
-                gender,
                 dob,
                 tags,
                 notes
@@ -1051,16 +1048,27 @@ exports.createWidgetReservation = async (req, res) => {
                 statusChanged = true;
             }
             // UPDATE
-            existingReservation.tableId = tableId || existingReservation.tableId;
-            existingReservation.shiftId = shift._id;
-            existingReservation.date = reservationDate;
-            existingReservation.time = formattedTime;
-            existingReservation.partySize = partySize;
-            existingReservation.source = source;
-            existingReservation.status = status;
-            existingReservation.seating = seating;
-            existingReservation.tags = tags;
-            existingReservation.notes = notes;
+            if (tableId) existingReservation.tableId = tableId;
+
+            if (date) existingReservation.date = reservationDate;
+
+            if (time) existingReservation.time = formattedTime;
+
+            if (partySize) existingReservation.partySize = partySize;
+
+            if (source) existingReservation.source = source;
+
+            if (status) existingReservation.status = status;
+
+            if (seating) existingReservation.seating = seating;
+
+            if (tags) existingReservation.tags = tags;
+
+            if (notes) existingReservation.notes = notes;
+
+            if (date || time) {
+                existingReservation.shiftId = shift._id;
+            }
 
             reservation = await existingReservation.save();
 

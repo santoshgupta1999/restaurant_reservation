@@ -44,6 +44,7 @@ const shiftSchema = new mongoose.Schema(
         },
         policyNote: { type: String },
         isActive: { type: Boolean, default: true },
+        isExpired: { type: Boolean, default: false },
     },
     { timestamps: true }
 );

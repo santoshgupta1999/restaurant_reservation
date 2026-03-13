@@ -19,7 +19,7 @@ const guestSchema = new mongoose.Schema(
             ref: "Restaurant",
             required: true
         },
-        firstName: { type: String, required: true, set: capitalize },
+        firstName: { type: String, set: capitalize },
         lastName: { type: String, set: capitalize },
         gender: { type: String, enum: ["Male", "Female", "Other", "N/A"], default: "N/A" },
         dob: { type: Date },
