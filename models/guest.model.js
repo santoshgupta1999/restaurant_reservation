@@ -21,7 +21,7 @@ const guestSchema = new mongoose.Schema(
         },
         firstName: { type: String, set: capitalize },
         lastName: { type: String, set: capitalize },
-        gender: { type: String, enum: ["Male", "Female", "Other", "N/A"], default: "N/A" },
+        gender: { type: String, enum: ["Male", "Female", "Other", "Prefer not to say", "N/A"], default: "N/A" },
         dob: { type: Date },
         anniversary: { type: Date },
         secondaryEmail: { type: String },
@@ -35,7 +35,7 @@ const guestSchema = new mongoose.Schema(
         phone: { type: String },
         countryCode: {
             type: String,
-            default: "+1"
+            default: "+961"
         },
         notes: { type: String },
         tags: [

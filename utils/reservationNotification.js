@@ -1,55 +1,90 @@
+// 
 const sendMail = require("../utils/mailer");
+const renderTemplate = require("../utils/renderTemplate");
+
+const TYPES = {
+    CONFIRMED: "Confirmed",
+    CANCELLED: "Cancelled"
+};
 
 const sendReservationNotification = async (reservation, guest, type) => {
 
     if (!guest.email) return;
 
-    const fullName = `${guest.firstName || ""} ${guest.lastName || ""}`.trim();
+    const fullName =
+        `${guest.firstName || ""} ${guest.lastName || ""}`.trim() || "Guest";
+
+    const formattedDate = new Date(reservation.date).toLocaleDateString("en-IN", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+    });
 
     let subject = "";
-    let text = "";
     let html = "";
+    let text = "";
 
-    if (type === "Confirmed") {
+    // ✅ CONFIRMED FLOW
+    if (type === TYPES.CONFIRMED) {
 
         subject = "Your Reservation is Confirmed";
 
-        text = `Hi, ${fullName},
-            Your reservation is confirmed.
-            Date: ${reservation.date.toDateString()}
-            Time: ${reservation.time}
-            Party Size: ${reservation.partySize}`;
+        html = await renderTemplate("booking-confirmation", {
+            fullName,
+            date: formattedDate,
+            time: reservation.time,
+            partySize: reservation.partySize,
+            reservationNo: reservation.reservationNo,
+            email: guest.email,
+            restaurantAddress: reservation.restaurantAddress
+        });
 
-        html = `
-            <h2>Hi, ${fullName},</h2>
-            <p>Your reservation has been <b>confirmed</b>.</p>
-            <p><b>Date:</b> ${reservation.date.toDateString()}</p>
-            <p><b>Time:</b> ${reservation.time}</p>
-            <p><b>Party Size:</b> ${reservation.partySize}</p>
-            <br/>
-            <p>We look forward to serving you!</p>
-        `;
+        text = `
+Hi ${fullName},
+Your reservation is confirmed.
 
-    } else if (type === "Cancelled") {
+Date: ${formattedDate}
+Time: ${reservation.time}
+Guests: ${reservation.partySize}
 
-        subject = "Your Reservation has been Cancelled ❌";
+Reservation ID: ${reservation._id}
+`;
 
-        text = `Hi, ${fullName},
-            Your reservation has been cancelled.
-            Date: ${reservation.date.toDateString()}
-            Time: ${reservation.time}`;
-
-        html = `
-            <h2>Hi, ${fullName},</h2>
-            <p>Your reservation has been <b>cancelled</b>.</p>
-            <p><b>Date:</b> ${reservation.date.toDateString()}</p>
-            <p><b>Time:</b> ${reservation.time}</p>
-            <br/>
-            <p>If this was a mistake, please contact us.</p>
-        `;
     }
 
-    await sendMail(guest.email, subject, text, html);
+    // ❌ CANCELLED FLOW
+    else if (type === TYPES.CANCELLED) {
+
+        subject = "Your Reservation has been Cancelled";
+
+        html = await renderTemplate("booking-cancelled", {
+            fullName,
+            date: formattedDate,
+            time: reservation.time,
+            reservationNo: reservation.reservationNo,
+            email: guest.email,
+            restaurantAddress: reservation.restaurantAddress,
+        });
+
+        text = `
+Hi ${fullName},
+Your reservation has been cancelled.
+
+Date: ${formattedDate}
+Time: ${reservation.time}
+
+Reservation ID: ${reservation._id}
+`;
+    }
+
+    try {
+        await sendMail(guest.email, subject, text, html);
+    } catch (error) {
+        console.error("Email failed:", error.message);
+    }
 };
 
-module.exports = { sendReservationNotification };
+module.exports = {
+    sendReservationNotification
+};

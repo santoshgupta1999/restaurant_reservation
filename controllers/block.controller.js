@@ -210,6 +210,17 @@ function convertTo12Hour(time) {
     return `${h.toString().padStart(2, "0")}:${minutes} ${ampm}`;
 }
 
+const formatDateDDMMYYYY = (date) => {
+    if (!date) return null;
+
+    const d = new Date(date);
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+
+    return `${day}/${month}/${year}`;
+};
+
 exports.createBlock = async (req, res) => {
     try {
         const {
@@ -456,27 +467,19 @@ exports.getAllBlocks = async (req, res) => {
             const obj = block.toObject();
 
             if (obj.startDate) {
-                obj.startDate = new Date(obj.startDate)
-                    .toISOString()
-                    .split("T")[0];
+                obj.startDate = formatDateDDMMYYYY(obj.startDate);
             }
 
             if (obj.endDate) {
-                obj.endDate = new Date(obj.endDate)
-                    .toISOString()
-                    .split("T")[0];
+                obj.endDate = formatDateDDMMYYYY(obj.endDate);
             }
 
             if (obj.createdAt) {
-                obj.createdAt = new Date(obj.createdAt)
-                    .toISOString()
-                    .split("T")[0];
+                obj.createdAt = formatDateDDMMYYYY(obj.createdAt);
             }
 
             if (obj.updatedAt) {
-                obj.updatedAt = new Date(obj.updatedAt)
-                    .toISOString()
-                    .split("T")[0];
+                obj.updatedAt = formatDateDDMMYYYY(obj.updatedAt);
             }
 
             if (obj.shiftIds && obj.shiftIds.length) {
@@ -537,13 +540,10 @@ exports.getBlockById = async (req, res) => {
         const block = blockRaw.toObject();
 
         /* ===== DATE FORMAT ===== */
-        const trimDate = (val) =>
-            val ? new Date(val).toISOString().split("T")[0] : null;
-
-        block.startDate = trimDate(block.startDate);
-        block.endDate = trimDate(block.endDate);
-        block.createdAt = trimDate(block.createdAt);
-        block.updatedAt = trimDate(block.updatedAt);
+        block.startDate = formatDateDDMMYYYY(block.startDate);
+        block.endDate = formatDateDDMMYYYY(block.endDate);
+        block.createdAt = formatDateDDMMYYYY(block.createdAt);
+        block.updatedAt = formatDateDDMMYYYY(block.updatedAt);
 
         /* ===== SHIFT TIME FORMAT ===== */
         if (block.shiftIds && block.shiftIds.length) {
@@ -556,8 +556,8 @@ exports.getBlockById = async (req, res) => {
                     shift.endTime = convertTo12Hour(shift.endTime);
                 }
 
-                shift.startDate = trimDate(shift.startDate);
-                shift.endDate = trimDate(shift.endDate);
+                shift.startDate = formatDateDDMMYYYY(shift.startDate);
+                shift.endDate = formatDateDDMMYYYY(shift.endDate);
 
                 return shift;
             });

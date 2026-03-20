@@ -72,6 +72,7 @@ exports.createReservation = async (req, res) => {
             source,
             status,
             seating,
+            isConfirmedPolicy,
             tags,
             notes
         } = req.body;
@@ -299,6 +300,7 @@ exports.createReservation = async (req, res) => {
             existingReservation.source = source;
             existingReservation.status = status;
             existingReservation.seating = seating;
+            existingReservation.isConfirmedPolicy = isConfirmedPolicy;
             existingReservation.tags = tags;
             existingReservation.notes = notes;
 
@@ -317,6 +319,7 @@ exports.createReservation = async (req, res) => {
                 source,
                 status,
                 seating,
+                isConfirmedPolicy,
                 tags,
                 notes
             });
@@ -749,7 +752,7 @@ exports.updateReservationStatus = async (req, res) => {
             id,
             { status },
             { new: true }
-        );
+        ).populate("restaurantId", "venueName heroImage city");
 
         if (!updated) {
             return res.status(404).json({
@@ -761,7 +764,15 @@ exports.updateReservationStatus = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: `Reservation ${status} successfully`,
-            data: updated,
+            data: {
+                ...updated.toObject(),
+                restaurant: {
+                    restaurantId: updated.restaurantId._id || null,
+                    name: updated.restaurantId?.venueName || null,
+                    logo: updated.restaurantId?.heroImage || null,
+                    address: updated.restaurantId?.city || null
+                }
+            }
         });
 
     } catch (error) {
@@ -1109,12 +1120,22 @@ exports.createWidgetReservation = async (req, res) => {
             ).catch(console.error);
         }
 
+        const restaurant = await Restaurant.findById(restaurantId)
+            .select("venueName city heroImage");
+
         return res.status(200).json({
             success: true,
             message: reservationId
                 ? "Reservation updated successfully."
                 : "Reservation created successfully.",
-            data: reservation
+            data: {
+                reservation,
+                restaurant: {
+                    name: restaurant?.venueName,
+                    address: restaurant?.city,
+                    logo: restaurant?.heroImage
+                }
+            }
         });
 
     } catch (error) {

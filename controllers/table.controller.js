@@ -1918,3 +1918,46 @@ exports.changeTableAssignment = async (req, res) => {
         });
     }
 };
+
+exports.getAvailableTable = async (req, res) => {
+    try {
+        const { restaurantId } = req.params;
+        const { partySize } = req.body;
+
+        if (!restaurantId) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId is required"
+            });
+        }
+
+        if (!partySize || partySize <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid partySize is required"
+            });
+        }
+
+        const tables = await Table.find({
+            restaurantId,
+            isActive: true,
+            status: "Available",
+            capacity: { $gte: partySize }
+        }).select("_id tableNumber capacity")
+            .sort({ capacity: 1 });
+
+        return res.status(200).json({
+            success: true,
+            count: tables.length,
+            data: tables
+        });
+
+    } catch (error) {
+        console.error("Error fetching available tables:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching available tables",
+            error: error.message
+        });
+    }
+};

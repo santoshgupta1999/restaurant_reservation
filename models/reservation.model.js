@@ -58,6 +58,11 @@ const reservationSchema = new mongoose.Schema({
         default: "Any"
     },
 
+    isConfirmedPolicy: {
+        type: Boolean,
+        default: false
+    },
+
     notes: String
 }, { timestamps: true });
 

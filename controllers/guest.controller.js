@@ -18,6 +18,17 @@ const formatTimeRange = (time) => {
     return `${start.toLocaleTimeString("en-US", opt)}–${end.toLocaleTimeString("en-US", opt)}`;
 };
 
+const formatDateDDMMYYYY = (date) => {
+    if (!date) return null;
+
+    const d = new Date(date);
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+
+    return `${day}/${month}/${year}`;
+};
+
 exports.createGuest = async (req, res) => {
     try {
         const {
@@ -131,10 +142,12 @@ exports.getGuests = async (req, res) => {
         if (isActive !== undefined) match.isActive = isActive;
         if (tags?.length) match.tags = { $in: tags };
 
+        const validStatuses = ["Confirmed", "Seated", "Finished"];
+
         const guests = await Guest.aggregate([
             { $match: match },
 
-            /* ================= LAST 3 VISITS (PAST ONLY) ================= */
+            /* ================= LAST 3 VISITS ================= */
             {
                 $lookup: {
                     from: "reservations",
@@ -146,7 +159,7 @@ exports.getGuests = async (req, res) => {
                                     $and: [
                                         { $eq: ["$guestId", "$$guestId"] },
                                         { $eq: ["$restaurantId", new mongoose.Types.ObjectId(restaurantId)] },
-                                        { $in: ["$status", ["Confirmed", "Completed"]] },
+                                        { $in: ["$status", validStatuses] },
                                         { $lte: ["$date", today] }
                                     ]
                                 }
@@ -168,7 +181,7 @@ exports.getGuests = async (req, res) => {
                 }
             },
 
-            /* ================= UPCOMING VISITS (FUTURE ONLY) ================= */
+            /* ================= UPCOMING VISITS ================= */
             {
                 $lookup: {
                     from: "reservations",
@@ -180,6 +193,7 @@ exports.getGuests = async (req, res) => {
                                     $and: [
                                         { $eq: ["$guestId", "$$guestId"] },
                                         { $eq: ["$restaurantId", new mongoose.Types.ObjectId(restaurantId)] },
+                                        { $in: ["$status", ["Pending", "Confirmed"]] },
                                         { $gt: ["$date", today] }
                                     ]
                                 }
@@ -202,7 +216,8 @@ exports.getGuests = async (req, res) => {
                                 $expr: {
                                     $and: [
                                         { $eq: ["$guestId", "$$guestId"] },
-                                        { $eq: ["$restaurantId", new mongoose.Types.ObjectId(restaurantId)] }
+                                        { $eq: ["$restaurantId", new mongoose.Types.ObjectId(restaurantId)] },
+                                        { $in: ["$status", validStatuses] }
                                     ]
                                 }
                             }
@@ -212,46 +227,65 @@ exports.getGuests = async (req, res) => {
                 }
             },
 
+            /* ================= CALCULATED FIELDS ================= */
             {
                 $addFields: {
-                    totalVisits: { $size: "$allVisits" }
+                    totalVisits: { $size: "$allVisits" },
+
+                    lastVisit: {
+                        $cond: [
+                            { $gt: [{ $size: "$last3Visits" }, 0] },
+                            { $arrayElemAt: ["$last3Visits.date", 0] },
+                            null
+                        ]
+                    },
+
+                    upcomingVisitAt: {
+                        $cond: [
+                            { $gt: [{ $size: "$upcomingVisits" }, 0] },
+                            { $arrayElemAt: ["$upcomingVisits.date", 0] },
+                            null
+                        ]
+                    }
                 }
             },
 
             { $project: { allVisits: 0 } },
+
             { $sort: { [sortBy]: sortOrder } }
         ]);
 
-        /* ================= DATE TRIM HELPER ================= */
-        const trimDate = (val) =>
-            val ? new Date(val).toISOString().split("T")[0] : null;
-
-        /* ================= NODE FORMAT ================= */
         const formattedGuests = guests.map(g => {
             const lastVisits = g.last3Visits.map(v => ({
-                date: trimDate(v.date),
+                date: formatDateDDMMYYYY(v.date),
                 time: formatTimeRange(v.time),
                 pax: v.partySize,
                 table: v.table?.tableNumber || null
             }));
 
             const upcoming = g.upcomingVisits.map(v => ({
-                date: trimDate(v.date),
+                date: formatDateDDMMYYYY(v.date),
                 time: formatTimeRange(v.time),
                 pax: v.partySize
             }));
 
             return {
                 ...g,
-                createdAt: trimDate(g.createdAt),
-                updatedAt: trimDate(g.updatedAt),
-                dob: trimDate(g.dob),
+
+                createdAt: formatDateDDMMYYYY(g.createdAt),
+                updatedAt: formatDateDDMMYYYY(g.updatedAt),
+                dob: formatDateDDMMYYYY(g.dob),
 
                 last3Visits: lastVisits,
-                lastVisit: lastVisits.length ? lastVisits[0].date : null,
+
+                lastVisit: formatDateDDMMYYYY(g.lastVisit),
+                upcomingVisitAt: formatDateDDMMYYYY(g.upcomingVisitAt),
 
                 upcomingVisits: upcoming,
-                upcomingVisitAt: upcoming.length ? upcoming[0].date : null
+
+                upcomingVisitAt: upcoming.length
+                    ? upcoming[0].date
+                    : null
             };
         });
 
@@ -297,42 +331,61 @@ exports.getGuestById = async (req, res) => {
         const reservations = await Reservation.find({
             guestId: id
         })
-            .sort({ reservationDate: -1 })
-            .populate("restaurantId", "name")
+            .sort({ date: -1 })
+            .populate("restaurantId", "venueName")
+            .populate("tableId", "tableNumber")
             .lean();
 
-        const totalVisits = reservations.length;
+        const validStatuses = ["Confirmed", "Seated", "Finished"];
+
+        const totalVisits = reservations.filter(r =>
+            validStatuses.includes(r.status)
+        ).length;
 
         /* ================= LAST VISIT ================= */
-        const lastVisit = reservations.find(r => r.status === "Completed");
+        const lastVisitObj = reservations.find(r =>
+            validStatuses.includes(r.status)
+        );
+
+        const lastVisit = lastVisitObj
+            ? formatDateDDMMYYYY(lastVisitObj.date)
+            : null;
 
         /* ================= UPCOMING VISIT ================= */
-        const upcomingVisit = reservations.find(
-            r => new Date(r.reservationDate) > new Date()
+        const upcomingVisitObj = reservations.find(r =>
+            ["Pending", "Confirmed"].includes(r.status) &&
+            new Date(r.date) > new Date()
         );
+
+        const upcomingVisit = upcomingVisitObj
+            ? formatDateDDMMYYYY(upcomingVisitObj.date)
+            : null;
 
         /* ================= LAST 3 VISITS ================= */
         const last3Visits = reservations
-            .filter(r => r.status === "Completed")
+            .filter(r => validStatuses.includes(r.status))
             .slice(0, 3)
             .map(r => ({
-                date: r.reservationDate,
-                time: `${r.startTime} - ${r.endTime}`,
+                date: formatDateDDMMYYYY(r.date),
+                time: formatTimeRange(r.time),
                 pax: r.partySize,
-                table: r.tableNo || null,
-                restaurant: r.restaurantId?.name || null
+                table: r.tableId?.tableNumber || null,
+                restaurant: r.restaurantId?.venueName || null
             }));
+
+        const guestObj = guest.toObject();
+        guestObj.dob = formatDateDDMMYYYY(guestObj.dob);
 
         /* ================= RESPONSE ================= */
         return res.status(200).json({
             success: true,
             message: "Guest full details fetched successfully",
             data: {
-                guest,
+                guest: guestObj,
                 insights: {
                     totalVisits,
-                    lastVisit: lastVisit ? lastVisit.reservationDate : null,
-                    upcomingVisit: upcomingVisit ? upcomingVisit.reservationDate : null,
+                    lastVisit,
+                    upcomingVisit,
                     last3Visits,
                     preferences: {
                         smoking: guest.smokingPreference || "Non smoking",

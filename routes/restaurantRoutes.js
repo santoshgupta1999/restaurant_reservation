@@ -40,6 +40,7 @@ router.get('/getAllLockedTables', tableController.getAllLockedTables);
 router.post('/getAllBookingsDetails', tableController.getAllBookingsDetails);
 
 router.put('/updateTableStatus/:id', tableController.updateTableStatus);
+router.post('/getAvailableTable/:restaurantId', tableController.getAvailableTable);
 // ------------------------------------------- Feedback ----------------------------------- //
 
 router.post('/createFeedback', feedbackValidator, validate, feedbackController.createFeedback);

@@ -64,15 +64,24 @@ const restaurantSchema = new mongoose.Schema(
         },
         country: {
             type: String,
-            required: true
+            // required: true
         },
+
         city: {
             type: String,
-            required: true
         },
-        // address: {
-        //     type: String,
-        // },
+
+        address: {
+            type: String,
+        },
+
+        countryCode: {
+            type: String,
+        },
+
+        phone: {
+            type: String,
+        },
 
         billingEmail: {
             type: String,
