@@ -7,156 +7,7 @@ const Guest = require("../models/guest.model");
 const sendMail = require("../utils/mailer");
 const mongoose = require('mongoose');
 const Room = require('../models/room.model');
-
-// exports.createTable = async (req, res) => {
-//     try {
-//         const tableData = req.body;
-
-//         const existing = await Table.findOne({
-//             restaurantId: tableData.restaurantId,
-//             tableNumber: tableData.tableNumber,
-//         });
-
-//         if (existing) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "Table number already exists for this restaurant.",
-//             });
-//         }
-
-//         const newTable = await Table.create(tableData);
-
-//         return res.status(201).json({
-//             success: true,
-//             message: "Table created successfully.",
-//             data: newTable,
-//         });
-
-//     } catch (error) {
-//         console.error("Error creating table:", error);
-//         res.status(500).json({
-//             success: false,
-//             message: "Error creating table.",
-//             error: error.message,
-//         });
-//     }
-// };
-
-// exports.createTable = async (req, res) => {
-//     try {
-//         const { restaurantId, rooms } = req.body;
-
-//         if (!restaurantId || !rooms?.length) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "restaurantId and rooms are required"
-//             });
-//         }
-
-//         let tablesToInsert = [];
-
-//         // 🔹 flatten payload
-//         for (const room of rooms) {
-//             if (!room.roomName || !room.tables) continue;
-
-//             for (const t of room.tables) {
-//                 tablesToInsert.push({
-//                     restaurantId,
-//                     roomName: room.roomName,
-//                     tableNumber: String(t.tableNumber).trim().toUpperCase(),
-//                     displayName: t.displayName || null,
-//                     capacity: t.capacity || 2,
-//                     shape: t.shape || "Square",
-//                     status: t.status || "Available",
-//                     position: t.position || { x: 0, y: 0 },
-//                     rotation: t.rotation || 0
-//                 });
-//             }
-//         }
-
-//         const total = tablesToInsert.length;
-
-//         if (!total) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "No tables provided"
-//             });
-//         }
-
-//         let insertedCount = 0;
-//         let skipped = [];
-
-//         try {
-//             const inserted = await Table.insertMany(tablesToInsert, {
-//                 ordered: false
-//             });
-//             insertedCount = inserted.length;
-
-//         } catch (error) {
-
-//             if (error?.writeErrors?.length) {
-
-//                 insertedCount = error.result?.nInserted || 0;
-
-//                 for (const e of error.writeErrors) {
-//                     const doc = e.err?.op || {};
-
-//                     let reason = "Duplicate table";
-
-//                     const msg =
-//                         e.errmsg ||
-//                         e.err?.errmsg ||
-//                         e.message ||
-//                         "";
-
-//                     if (msg.includes("tableNumber")) {
-//                         reason = "Same table number already exists in this room";
-//                     }
-
-//                     if (msg.includes("position")) {
-//                         reason = "Another table already exists at same position in this room";
-//                     }
-
-//                     skipped.push({
-//                         roomName: doc.roomName,
-//                         tableNumber: doc.tableNumber,
-//                         reason
-//                     });
-//                 }
-
-//             } else {
-//                 throw error;
-//             }
-//         }
-
-//         const skippedCount = skipped.length;
-
-//         let message = `${insertedCount} tables inserted successfully`;
-
-//         if (skippedCount) {
-//             message += `, ${skippedCount} skipped (duplicate number or position)`;
-//         }
-
-//         return res.status(201).json({
-//             success: true,
-//             message,
-//             stats: {
-//                 totalReceived: total,
-//                 inserted: insertedCount,
-//                 skipped: skippedCount
-//             },
-//             skippedTables: skipped
-//         });
-
-//     } catch (error) {
-//         console.error(error);
-//         res.status(500).json({
-//             success: false,
-//             message: "Error creating tables",
-//             error: error.message
-//         });
-//     }
-// };
+const moment = require('moment');
 
 exports.createTable = async (req, res) => {
     try {
@@ -1921,8 +1772,7 @@ exports.changeTableAssignment = async (req, res) => {
 
 exports.getAvailableTable = async (req, res) => {
     try {
-        const { restaurantId } = req.params;
-        const { partySize } = req.body;
+        const { restaurantId, date, time, partySize } = req.body;
 
         if (!restaurantId) {
             return res.status(400).json({
@@ -1938,18 +1788,137 @@ exports.getAvailableTable = async (req, res) => {
             });
         }
 
+        if (!date || !time) {
+            return res.status(400).json({
+                success: false,
+                message: "date and time are required"
+            });
+        }
+
+        const selectedDate = moment(date, ["YYYY-MM-DD", "DD/MM/YYYY"], true);
+        if (!selectedDate.isValid()) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid date format"
+            });
+        }
+
+        const slotTime = moment(time, "hh:mm A").format("HH:mm");
+
+        /* ================= FETCH TABLES WITH ROOM ================= */
         const tables = await Table.find({
             restaurantId,
-            isActive: true,
             status: "Available",
             capacity: { $gte: partySize }
-        }).select("_id tableNumber capacity")
-            .sort({ capacity: 1 });
+        })
+            .select("_id tableNumber capacity roomId")
+            .populate("roomId", "name");
+
+        if (!tables.length) {
+            return res.status(200).json({
+                success: true,
+                totalTables: 0,
+                totalRooms: 0,
+                data: []
+            });
+        }
+
+        const tableIds = tables.map(t => t._id);
+
+        /* ================= BLOCK CHECK ================= */
+        const blocks = await Block.find({
+            restaurantId,
+            status: "Active",
+            isExpired: false,
+            startDate: { $lte: selectedDate.toDate() },
+            endDate: { $gte: selectedDate.toDate() }
+        });
+
+        let blockedTableIds = new Set();
+
+        for (const block of blocks) {
+
+            if (block.isFullRestaurantBlock) {
+                return res.status(200).json({
+                    success: true,
+                    totalTables: 0,
+                    totalRooms: 0,
+                    data: []
+                });
+            }
+
+            if (block.tableIds?.length) {
+
+                if (block.startTime && block.endTime) {
+                    if (slotTime >= block.startTime && slotTime < block.endTime) {
+                        block.tableIds.forEach(id =>
+                            blockedTableIds.add(id.toString())
+                        );
+                    }
+                } else {
+                    block.tableIds.forEach(id =>
+                        blockedTableIds.add(id.toString())
+                    );
+                }
+            }
+        }
+
+        /* ================= RESERVATION CHECK ================= */
+        const reservations = await Reservation.find({
+            restaurantId,
+            date: {
+                $gte: selectedDate.startOf("day").toDate(),
+                $lte: selectedDate.endOf("day").toDate()
+            },
+            status: { $in: ["Pending", "Confirmed"] }
+        }).select("tableId time");
+
+        let reservedTableIds = new Set();
+
+        for (const r of reservations) {
+            const resTime = moment(r.time, "HH:mm").format("HH:mm");
+
+            if (resTime === slotTime) {
+                reservedTableIds.add(r.tableId.toString());
+            }
+        }
+
+        /* ================= FILTER AVAILABLE ================= */
+        const availableTables = tables.filter(t =>
+            !blockedTableIds.has(t._id.toString()) &&
+            !reservedTableIds.has(t._id.toString())
+        );
+
+        /* ================= GROUP BY ROOM ================= */
+        const roomMap = new Map();
+
+        for (const table of availableTables) {
+
+            const roomId = table.roomId?._id?.toString() || "no-room";
+            const roomName = table.roomId?.name || "No Room";
+
+            if (!roomMap.has(roomId)) {
+                roomMap.set(roomId, {
+                    roomId,
+                    roomName,
+                    tables: []
+                });
+            }
+
+            roomMap.get(roomId).tables.push({
+                _id: table._id,
+                tableNumber: table.tableNumber,
+                capacity: table.capacity
+            });
+        }
+
+        const groupedData = Array.from(roomMap.values());
 
         return res.status(200).json({
             success: true,
-            count: tables.length,
-            data: tables
+            totalTables: availableTables.length,
+            totalRooms: groupedData.length,
+            data: groupedData
         });
 
     } catch (error) {

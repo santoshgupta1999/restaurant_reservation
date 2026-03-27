@@ -51,6 +51,7 @@ router.post('/venues/edit', upload.single("heroImage"), restController.editVenue
 router.post('/venues/editPlanStatus', restController.editVenuePlanAndStatus);
 router.post('/venues/opertionalMetrics', restController.opertionalMetrics);
 router.post('/venues', restaurantController.getVenueList);
+router.post('/venues/tiers', TierController.getActiveTiersForVenue);
 
 // Tier
 router.post("/tiers/add", TierController.createTier);

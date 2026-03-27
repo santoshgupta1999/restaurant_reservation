@@ -9,6 +9,8 @@ const mongoose = require('mongoose');
 // const sendSMS = require('../utils/sendSMS'); // <-- optional SMS helper
 const sendEmail = require('../utils/mailer'); // <-- optional Email helper
 const { sendReservationNotification } = require("../utils/reservationNotification");
+const { formatDate, formatTime } = require('../utils/dateFormatter');
+
 // const getDayOfWeek = (dateString) => {
 //     const date = new Date(dateString);
 //     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -77,10 +79,24 @@ exports.createReservation = async (req, res) => {
             notes
         } = req.body;
 
-        if (!restaurantId || !date || !time) {
+        if (!restaurantId) {
             return res.status(400).json({
                 success: false,
-                message: "restaurantId, date & time are required."
+                message: "restaurantId is required."
+            });
+        }
+
+        if (!date) {
+            return res.status(400).json({
+                success: false,
+                message: "Date is required."
+            });
+        }
+
+        if (!time) {
+            return res.status(400).json({
+                success: false,
+                message: "Time is required."
             });
         }
 
@@ -209,7 +225,7 @@ exports.createReservation = async (req, res) => {
             if (existingBooking) {
                 return res.status(400).json({
                     success: false,
-                    message: "This table is already booked for selected time."
+                    message: "This table is already booked for selected Date & Time."
                 });
             }
         }
@@ -279,8 +295,21 @@ exports.createReservation = async (req, res) => {
 
         let statusChanged = false;
         let reservation;
+        let isUpdate = false;
 
         if (existingReservation) {
+
+            // check if important fields changed
+            if (
+                existingReservation.date.toISOString() !== reservationDate.toISOString() ||
+                existingReservation.time !== formattedTime ||
+                existingReservation.partySize !== partySize ||
+                String(existingReservation.tableId) !== String(tableId) ||
+                existingReservation.seating !== seating ||
+                existingReservation.source !== source
+            ) {
+                isUpdate = true;
+            }
 
             if (["Finished", "No-show", "Cancelled"].includes(existingReservation.status)) {
                 return res.status(400).json({
@@ -333,15 +362,32 @@ exports.createReservation = async (req, res) => {
             upcomingVisitAt: reservationDate
         });
 
-        if (
-            statusChanged &&
-            ["Confirmed", "Cancelled"].includes(reservation.status)
-        ) {
-            sendReservationNotification(
-                reservation,
-                guest,
-                reservation.status
-            ).catch(console.error);
+        if (existingReservation) {
+
+            if (reservation.status === "Cancelled" && statusChanged) {
+                console.log("SEND CANCELLED");
+                sendReservationNotification(reservation, guest, "Cancelled");
+            }
+
+            else if (reservation.status === "Confirmed") {
+
+                if (statusChanged) {
+                    console.log("SEND CONFIRMED");
+                    sendReservationNotification(reservation, guest, "Confirmed");
+                }
+
+                else if (isUpdate) {
+                    console.log("SEND UPDATED");
+                    sendReservationNotification(reservation, guest, "Updated");
+                }
+            }
+
+        } else {
+
+            if (["Confirmed", "Cancelled"].includes(reservation.status)) {
+                console.log("SEND NEW");
+                sendReservationNotification(reservation, guest, reservation.status);
+            }
         }
 
         return res.status(200).json({
@@ -490,31 +536,31 @@ exports.getReservations = async (req, res) => {
             const obj = r.toObject();
 
             /* Reservation dates */
-            obj.date = trimDate(obj.date);
-            obj.createdAt = trimDate(obj.createdAt);
-            obj.updatedAt = trimDate(obj.updatedAt);
+            obj.date = formatDate(obj.date);
+            obj.createdAt = formatDate(obj.createdAt);
+            obj.updatedAt = formatDate(obj.updatedAt);
 
             /* Convert reservation time */
             if (obj.time) {
-                obj.time = convertTo12Hour(obj.time);
+                obj.time = formatTime(obj.time);
             }
 
             /* Shift time */
             if (obj.shiftId) {
                 if (obj.shiftId.startTime) {
-                    obj.shiftId.startTime = convertTo12Hour(obj.shiftId.startTime);
+                    obj.shiftId.startTime = formatTime(obj.shiftId.startTime);
                 }
 
                 if (obj.shiftId.endTime) {
-                    obj.shiftId.endTime = convertTo12Hour(obj.shiftId.endTime);
+                    obj.shiftId.endTime = formatTime(obj.shiftId.endTime);
                 }
             }
 
             /* Guest dates */
             if (obj.guestId) {
-                obj.guestId.dob = trimDate(obj.guestId.dob);
-                obj.guestId.lastVisitAt = trimDate(obj.guestId.lastVisitAt);
-                obj.guestId.upcomingVisitAt = trimDate(obj.guestId.upcomingVisitAt);
+                obj.guestId.dob = formatDate(obj.guestId.dob);
+                obj.guestId.lastVisitAt = formatDate(obj.guestId.lastVisitAt);
+                obj.guestId.upcomingVisitAt = formatDate(obj.guestId.upcomingVisitAt);
             }
 
             /* Convert roomId.name → roomName */
@@ -555,7 +601,7 @@ exports.getReservationById = async (req, res) => {
         }
 
         const reservation = await Reservation.findById(id)
-            .populate("restaurantId", "name email phone address")
+            .populate("restaurantId", "venueName countryCode phone city")
             .populate("tableId", "tableNumber roomName capacity")
             .populate("shiftId", "name startTime endTime type");
 
@@ -785,6 +831,72 @@ exports.updateReservationStatus = async (req, res) => {
     }
 };
 
+exports.cancelReservation = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!id || id.length !== 24) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid reservation ID',
+            });
+        }
+
+        const reservation = await Reservation.findById(id).populate("guestId");
+
+        if (!reservation) {
+            return res.status(404).json({
+                success: false,
+                message: 'Reservation not found',
+            });
+        }
+
+        const restrictedStatuses = ["Cancelled", "Finished", "Seated", "No-show"];
+
+        if (restrictedStatuses.includes(reservation.status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot cancel a reservation that is ${reservation.status}`,
+            });
+        }
+
+        reservation.status = "Cancelled";
+        await reservation.save();
+
+        const guest = {
+            email: reservation.guestId?.email,
+            firstName: reservation.guestId?.firstName,
+            lastName: reservation.guestId?.lastName
+        };
+
+        await sendReservationNotification(reservation, guest, "Cancelled");
+
+        const updated = await reservation.populate("restaurantId", "venueName heroImage city");
+
+        return res.status(200).json({
+            success: true,
+            message: 'Reservation cancelled successfully',
+            data: {
+                ...updated.toObject(),
+                restaurant: {
+                    restaurantId: updated.restaurantId?._id || null,
+                    name: updated.restaurantId?.venueName || null,
+                    logo: updated.restaurantId?.heroImage || null,
+                    address: updated.restaurantId?.city || null
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Error cancelling reservation:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message,
+        });
+    }
+};
+
 exports.deleteReservationById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -978,7 +1090,7 @@ exports.createWidgetReservation = async (req, res) => {
             if (existingBooking) {
                 return res.status(400).json({
                     success: false,
-                    message: "This table is already booked for selected time."
+                    message: "This table is already booked for selected Date & Time."
                 });
             }
         }
@@ -1046,8 +1158,21 @@ exports.createWidgetReservation = async (req, res) => {
 
         let statusChanged = false;
         let reservation;
+        let isUpdate = false;
 
         if (existingReservation) {
+
+            // check if important fields changed
+            if (
+                existingReservation.date.toISOString() !== reservationDate.toISOString() ||
+                existingReservation.time !== formattedTime ||
+                existingReservation.partySize !== partySize ||
+                String(existingReservation.tableId) !== String(tableId) ||
+                existingReservation.seating !== seating ||
+                existingReservation.source !== source
+            ) {
+                isUpdate = true;
+            }
 
             if (["Finished", "No-show", "Cancelled"].includes(existingReservation.status)) {
                 return res.status(400).json({
@@ -1109,15 +1234,32 @@ exports.createWidgetReservation = async (req, res) => {
             upcomingVisitAt: reservationDate
         });
 
-        if (
-            statusChanged &&
-            ["Confirmed", "Cancelled"].includes(reservation.status)
-        ) {
-            sendReservationNotification(
-                reservation,
-                guest,
-                reservation.status
-            ).catch(console.error);
+        if (existingReservation) {
+
+            if (reservation.status === "Cancelled" && statusChanged) {
+                console.log("SEND CANCELLED");
+                sendReservationNotification(reservation, guest, "Cancelled");
+            }
+
+            else if (reservation.status === "Confirmed") {
+
+                if (statusChanged) {
+                    console.log("SEND CONFIRMED");
+                    sendReservationNotification(reservation, guest, "Confirmed");
+                }
+
+                else if (isUpdate) {
+                    console.log("SEND UPDATED");
+                    sendReservationNotification(reservation, guest, "Updated");
+                }
+            }
+
+        } else {
+
+            if (["Confirmed", "Cancelled"].includes(reservation.status)) {
+                console.log("SEND NEW");
+                sendReservationNotification(reservation, guest, reservation.status);
+            }
         }
 
         const restaurant = await Restaurant.findById(restaurantId)
@@ -1177,6 +1319,7 @@ exports.getReservationConfirmation = async (req, res) => {
             guest: {
                 firstName: guest?.firstName,
                 lastName: guest?.lastName,
+                countryCode: guest?.countryCode,
                 phone: guest?.phone,
                 email: guest?.email
             },
@@ -1190,8 +1333,10 @@ exports.getReservationConfirmation = async (req, res) => {
             },
 
             restaurant: {
+                restaurantId: restaurant?._id,
                 name: restaurant?.venueName,
                 address: restaurant?.city,
+                countryCode: restaurant?.countryCode,
                 phone: restaurant?.phone,
                 website: restaurant?.website,
                 logo: logoUrl

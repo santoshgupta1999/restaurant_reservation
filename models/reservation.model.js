@@ -81,7 +81,7 @@ reservationSchema.pre("save", async function (next) {
             { new: true, upsert: true }
         );
 
-        this.reservationNo = `RES-${String(counter.seq).padStart(4, "0")}`;
+        this.reservationNo = `RES-${String(counter.seq).padStart(6, "0")}`;
 
         next();
 

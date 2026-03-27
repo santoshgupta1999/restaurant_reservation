@@ -3,6 +3,7 @@ const Guest = require("../models/guest.model");
 const Reservation = require('../models/reservation.model');
 const Table = require('../models/table.model');
 const Restaurant = require('../models/Restaurant.model');
+const { formatDate } = require('../utils/dateFormatter');
 
 const formatTimeRange = (time) => {
     if (!time) return null;
@@ -142,7 +143,7 @@ exports.getGuests = async (req, res) => {
         if (isActive !== undefined) match.isActive = isActive;
         if (tags?.length) match.tags = { $in: tags };
 
-        const validStatuses = ["Confirmed", "Seated", "Finished"];
+        const validStatuses = ["Seated", "Finished"];
 
         const guests = await Guest.aggregate([
             { $match: match },
@@ -257,14 +258,14 @@ exports.getGuests = async (req, res) => {
 
         const formattedGuests = guests.map(g => {
             const lastVisits = g.last3Visits.map(v => ({
-                date: formatDateDDMMYYYY(v.date),
+                date: formatDate(v.date),
                 time: formatTimeRange(v.time),
                 pax: v.partySize,
                 table: v.table?.tableNumber || null
             }));
 
             const upcoming = g.upcomingVisits.map(v => ({
-                date: formatDateDDMMYYYY(v.date),
+                date: formatDate(v.date),
                 time: formatTimeRange(v.time),
                 pax: v.partySize
             }));
@@ -272,14 +273,14 @@ exports.getGuests = async (req, res) => {
             return {
                 ...g,
 
-                createdAt: formatDateDDMMYYYY(g.createdAt),
-                updatedAt: formatDateDDMMYYYY(g.updatedAt),
-                dob: formatDateDDMMYYYY(g.dob),
+                createdAt: formatDate(g.createdAt),
+                updatedAt: formatDate(g.updatedAt),
+                dob: formatDate(g.dob),
 
                 last3Visits: lastVisits,
 
-                lastVisit: formatDateDDMMYYYY(g.lastVisit),
-                upcomingVisitAt: formatDateDDMMYYYY(g.upcomingVisitAt),
+                lastVisit: formatDate(g.lastVisit),
+                upcomingVisitAt: formatDate(g.upcomingVisitAt),
 
                 upcomingVisits: upcoming,
 
@@ -336,7 +337,7 @@ exports.getGuestById = async (req, res) => {
             .populate("tableId", "tableNumber")
             .lean();
 
-        const validStatuses = ["Confirmed", "Seated", "Finished"];
+        const validStatuses = ["Seated", "Finished"];
 
         const totalVisits = reservations.filter(r =>
             validStatuses.includes(r.status)
@@ -348,7 +349,7 @@ exports.getGuestById = async (req, res) => {
         );
 
         const lastVisit = lastVisitObj
-            ? formatDateDDMMYYYY(lastVisitObj.date)
+            ? formatDate(lastVisitObj.date)
             : null;
 
         /* ================= UPCOMING VISIT ================= */
@@ -358,7 +359,7 @@ exports.getGuestById = async (req, res) => {
         );
 
         const upcomingVisit = upcomingVisitObj
-            ? formatDateDDMMYYYY(upcomingVisitObj.date)
+            ? formatDate(upcomingVisitObj.date)
             : null;
 
         /* ================= LAST 3 VISITS ================= */
@@ -366,7 +367,7 @@ exports.getGuestById = async (req, res) => {
             .filter(r => validStatuses.includes(r.status))
             .slice(0, 3)
             .map(r => ({
-                date: formatDateDDMMYYYY(r.date),
+                date: formatDate(r.date),
                 time: formatTimeRange(r.time),
                 pax: r.partySize,
                 table: r.tableId?.tableNumber || null,
@@ -374,7 +375,7 @@ exports.getGuestById = async (req, res) => {
             }));
 
         const guestObj = guest.toObject();
-        guestObj.dob = formatDateDDMMYYYY(guestObj.dob);
+        guestObj.dob = formatDate(guestObj.dob);
 
         /* ================= RESPONSE ================= */
         return res.status(200).json({

@@ -1,7 +1,7 @@
 const Block = require("../models/block.model");
 const Table = require("../models/table.model");
 const Shift = require("../models/shift.model");
-
+const Room = require("../models/room.model");
 
 // exports.createBlock = async (req, res) => {
 //     try {
@@ -221,22 +221,39 @@ const formatDateDDMMYYYY = (date) => {
     return `${day}/${month}/${year}`;
 };
 
+const convertTo24Hour = (time) => {
+    if (!time) return null;
+
+    const [t, modifier] = time.split(" ");
+    let [hours, minutes] = t.split(":");
+
+    if (modifier === "PM" && hours !== "12") {
+        hours = String(parseInt(hours, 10) + 12);
+    }
+    if (modifier === "AM" && hours === "12") {
+        hours = "00";
+    }
+
+    return `${hours.padStart(2, "0")}:${minutes}`;
+};
+
 exports.createBlock = async (req, res) => {
     try {
         const {
             blockId,
-
             restaurantId,
             reason,
-            status, // Draft | Active
+            status,
             isFullRestaurantBlock,
             tableIds,
-            roomName,
+            roomId, //FIXED
             shiftIds,
             startDate,
             endDate,
             daysActive,
-            note
+            note,
+            startTime,
+            endTime
         } = req.body;
 
         if (!restaurantId || !reason) {
@@ -253,16 +270,12 @@ exports.createBlock = async (req, res) => {
             });
         }
 
-        /* ===============================
-           PRIORITY
-        =============================== */
+        /* ================= PRIORITY ================= */
         let priority = 1;
         if (isFullRestaurantBlock) priority = 3;
-        else if (roomName) priority = 2;
+        else if (roomId) priority = 2;
 
-        /* ===============================
-           FETCH EXISTING BLOCK (UPDATE)
-        =============================== */
+        /* ================= EXISTING BLOCK ================= */
         let existingBlock = null;
         if (blockId) {
             existingBlock = await Block.findById(blockId);
@@ -274,10 +287,9 @@ exports.createBlock = async (req, res) => {
             }
         }
 
-        /* ===============================
-           CONFLICT CHECK
-        =============================== */
+        /* ================= CONFLICT CHECK ================= */
         if (status !== "Draft") {
+
             const conflictQuery = {
                 restaurantId,
                 status: "Active",
@@ -294,42 +306,36 @@ exports.createBlock = async (req, res) => {
             for (const block of activeBlocks) {
 
                 if (block.isFullRestaurantBlock || isFullRestaurantBlock) {
-                    conflicts.push({
-                        type: "FULL_RESTAURANT",
-                        blockId: block._id
-                    });
+                    conflicts.push({ type: "FULL_RESTAURANT", blockId: block._id });
                     continue;
                 }
 
-                if (roomName && block.roomName === roomName) {
+                /* ROOM CONFLICT */
+                if (roomId && block.roomId?.toString() === roomId.toString()) {
                     conflicts.push({
                         type: "ROOM",
-                        roomName,
+                        roomId,
                         blockId: block._id
                     });
                 }
 
+                /* TABLE CONFLICT */
                 if (tableIds?.length && block.tableIds?.length) {
                     const overlap = tableIds.some(id =>
                         block.tableIds.map(t => t.toString()).includes(id.toString())
                     );
                     if (overlap) {
-                        conflicts.push({
-                            type: "TABLE",
-                            blockId: block._id
-                        });
+                        conflicts.push({ type: "TABLE", blockId: block._id });
                     }
                 }
 
+                /* SHIFT CONFLICT */
                 if (shiftIds?.length && block.shiftIds?.length) {
                     const overlap = shiftIds.some(id =>
                         block.shiftIds.map(s => s.toString()).includes(id.toString())
                     );
                     if (overlap) {
-                        conflicts.push({
-                            type: "SHIFT",
-                            blockId: block._id
-                        });
+                        conflicts.push({ type: "SHIFT", blockId: block._id });
                     }
                 }
             }
@@ -343,25 +349,22 @@ exports.createBlock = async (req, res) => {
             }
         }
 
-        /* ===============================
-           FIND TABLES TO BLOCK
-        =============================== */
+        /* ================= FIND TABLES ================= */
         let finalTableIds = [];
 
         if (isFullRestaurantBlock) {
             const allTables = await Table.find({ restaurantId }).select("_id");
             finalTableIds = allTables.map(t => t._id);
-        } else if (roomName) {
-            const roomTables = await Table.find({ restaurantId, roomName }).select("_id");
+
+        } else if (roomId) { // FIXED
+            const roomTables = await Table.find({ restaurantId, roomId }).select("_id");
             finalTableIds = roomTables.map(t => t._id);
+
         } else if (tableIds?.length) {
             finalTableIds = tableIds;
         }
 
-        /* ===============================
-           RESET RESTAURANT (UPDATE ONLY)
-           🔥 MOST IMPORTANT FIX
-        =============================== */
+        /* ================= RESET (UPDATE CASE) ================= */
         if (existingBlock) {
             await Table.updateMany(
                 { restaurantId },
@@ -374,9 +377,11 @@ exports.createBlock = async (req, res) => {
             );
         }
 
-        /* ===============================
-           CREATE / UPDATE BLOCK
-        =============================== */
+        /* ================= TIME ================= */
+        const normalizedStartTime = startTime ? convertTo24Hour(startTime) : null;
+        const normalizedEndTime = endTime ? convertTo24Hour(endTime) : null;
+
+        /* ================= PAYLOAD ================= */
         const payload = {
             restaurantId,
             reason,
@@ -385,21 +390,21 @@ exports.createBlock = async (req, res) => {
             isExpired: false,
             isFullRestaurantBlock: !!isFullRestaurantBlock,
             tableIds: finalTableIds,
-            roomName,
+            roomId: roomId || null, //FIXED
             shiftIds: shiftIds || [],
             startDate: status === "Draft" ? null : startDate,
             endDate: status === "Draft" ? null : endDate,
             daysActive: daysActive || [],
-            note
+            note,
+            startTime: normalizedStartTime,
+            endTime: normalizedEndTime
         };
 
         const block = blockId
             ? await Block.findByIdAndUpdate(blockId, payload, { new: true })
             : await Block.create(payload);
 
-        /* ===============================
-           APPLY CURRENT BLOCK
-        =============================== */
+        /* ================= APPLY BLOCK ================= */
         if (finalTableIds.length) {
             await Table.updateMany(
                 { _id: { $in: finalTableIds } },
@@ -450,6 +455,7 @@ exports.getAllBlocks = async (req, res) => {
         })
             .populate("tableIds", "tableNumber roomName capacity")
             .populate("shiftIds", "name startTime endTime")
+            .populate("roomId", "_id name")
             .sort({ startDate: 1 });
 
         const endedRaw = await Block.find({
@@ -480,6 +486,14 @@ exports.getAllBlocks = async (req, res) => {
 
             if (obj.updatedAt) {
                 obj.updatedAt = formatDateDDMMYYYY(obj.updatedAt);
+            }
+
+            if (obj.startTime) {
+                obj.startTime = convertTo12Hour(obj.startTime);
+            }
+
+            if (obj.endTime) {
+                obj.endTime = convertTo12Hour(obj.endTime);
             }
 
             if (obj.shiftIds && obj.shiftIds.length) {

@@ -1,73 +1,90 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
-<body style="margin:0; padding:0; background:#f5f5f5; font-family:Arial;">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://itdevelopmentservices.com/design_website/REMI/assets/images/logo/FaveIcon.png" type="image/png"
+        rel="icon">
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:ital,wght@0,300..900;1,300..900&display=swap"
+        rel="stylesheet">
+    <title>Cancellation From User</title>
 
-    <table width="100%" align="center">
-        <tr>
-            <td align="center">
+</head>
 
-                <table width="600" style="background:#fff; padding:20px; margin-top:30px; border-radius:10px;">
-                    <tr>
-                        <td align="center">
-                            <h2 style="color:#dc3545;">❌ Reservation Cancelled</h2>
-                        </td>
-                    </tr>
+<body style="margin:0; padding:0; font-family:Rubik, sans-serif;">
 
-                    <tr>
-                        <td align="center">
-                            <p>Hello,</p>
-                            <h3>
-                                <%= fullName %>
-                            </h3>
-                        </td>
-                    </tr>
+    <table style="width:50%; margin:auto; margin-top:30px; margin-bottom:30px;">
+        <thead>
+            <tr>
+                <th>
+                    <h1 style="color:#45818A; font-weight:600; text-align: center; margin-bottom: 15px; font-size:22px;
+  "><img src="https://itdevelopmentservices.com/design_website/REMI/assets/images/Icon/cancellation.png"
+                            alt="customerBookingFormIcon" style="margin-right:10px;">Reservation cancelled</h1>
+                    <p style="font-size: 17px; font-weight: 500; color: #333;">Your cancellation has been processed</p>
+                </th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><img src="https://sisccltd.com/restaurant_reservation/uploads/restaurants/logo/<%= image %>"
+                        alt="BookingConfirmationDetail" style="width:570px;
+   height:229px; object-fit:cover; border-radius: 16px;"></td>
+            </tr>
 
-                    <tr>
-                        <td align="center">
-                            <strong>
-                                <%= date %>
-                            </strong>
-                        </td>
-                    </tr>
+            <tr style="background:#F6FAFA; display:block; margin-top:20px; text-align:center; border-radius:15px; padding:5px 20px 20px 20px;
+  box-shadow:0px 0px 3px 0px #ccc;">
+                <td style="display:block;">
+                    <h2 style="color:#4B4B4B; font-size:20px; margin-top:15px; margin-bottom:20px;">
+                        <%=restaurantName%> - <%=city%>
+                    </h2>
+                </td>
+                <td style="color:#4B4B4B; display:block; text-decoration:line-through; "><strong>
+                        <%= date %>
+                    </strong></td>
+                <td style="color:#4B4B4B; display:block; margin-top:10px;"><strong
+                        style="text-decoration:line-through;">
+                        <%= partySize %> guests
+                    </strong><span style="color:#45818A; font-weight:600; text-decoration:line-through; ">
+                        <%= time %>
+                    </span>
+                </td>
+            </tr>
 
-                    <tr>
-                        <td align="center">
-                            <span>
-                                <%= time %>
-                            </span>
-                        </td>
-                    </tr>
+            <tr>
+                <td align="center">
+                    <a href="https://itdevelopmentservices.com/restaurants/customer/<%=restaurantId%>"
+                        style="text-decoration:none; color:inherit; display:inline-block;">
 
-                    <tr>
-                        <td align="center" style="margin-top:15px; padding:10px; background:#dc3545; color:#fff;">
-                            Reservation No: <%= reservationNo %>
-                        </td>
-                    </tr>
+                        <span style="display:inline-block;">
+                            <img src="https://itdevelopmentservices.com/design_website/REMI/assets/images/customerBookingFormIcon/customerBookingFormIcon15.png"
+                                alt="icon" style="vertical-align:middle; margin-right:5px;">
+                            <span style="vertical-align:middle;">Book again</span>
+                        </span>
+                    </a>
+                </td>
+            </tr>
 
-                    <tr>
-                        <td align="center" style="padding-top:20px;">
-                            <p>Your reservation has been cancelled.</p>
-                        </td>
-                    </tr>
+            <tr style="display: block; margin:0px; border-radius: 15px; padding:20px; box-shadow:0px 0px 3px #cccccc;">
+                <td>
+                    <p style="color:#45818A; display: flex; align-items:flex-start; line-height:14px; margin: 0px;"><img
+                            src="https://itdevelopmentservices.com/design_website/REMI/assets/images/Icon/InfoIcon.png"
+                            alt="customerBookingFormIcon" style="margin-right:5px;">No cancellation fee was charged. You
+                        cancelled within the free<br>cancellation window.</p>
+                </td>
+            </tr>
 
-                    <tr>
-                        <td align="center" style="padding-top:20px;">
-                            <p>📍 <%= restaurantAddress || "city" %>
-                            </p>
-                        </td>
-                    </tr>
+            <tr>
+                <td>
+                    <p style="margin-right: 5px; margin-top:30px; font-size:15px; font-weight:500; display:flex; align-items:center; justify-content:center;
+    font-style:italic; color:#1E1E1E;">Powered By<img
+                            src="https://itdevelopmentservices.com/design_website/REMI/assets/images/logo/LoginLogo.png"
+                            alt="logo" style="width:50px; margin-left:5px;"></p>
+                </td>
+            </tr>
 
-                    <tr>
-                        <td align="center" style="padding-top:20px; font-size:12px;">
-                            This email was sent to <%= email %>
-                        </td>
-                    </tr>
 
-                </table>
-
-            </td>
-        </tr>
+        </tbody>
     </table>
 
 </body>

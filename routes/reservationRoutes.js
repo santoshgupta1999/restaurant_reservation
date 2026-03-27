@@ -26,6 +26,8 @@ router.put('/update/:id',
 router.delete('/:id', reservController.deleteReservationById);
 router.post('/status/:id', reservController.updateReservationStatus);
 
+router.post('/cancelled/:id', reservController.cancelReservation);
+
 router.post('/widget-booking/:restaurantId', reservController.createWidgetReservation);
 router.get('/confirmation/:reservationId', reservController.getReservationConfirmation);
 

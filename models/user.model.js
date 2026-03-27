@@ -18,7 +18,7 @@ const UserSchema = new mongoose.Schema(
         },
         role: {
             type: String,
-            enum: ['Admin', 'Host', 'super_admin', 'Manager'],
+            enum: ['Admin', 'Host', 'super_admin', 'Manager', 'Call Center'],
             default: 'Manager',
         },
         profileImage: {
@@ -36,6 +36,8 @@ const UserSchema = new mongoose.Schema(
         lastLogin: {
             type: Date
         },
+        resetPasswordToken: String,
+        resetPasswordExpire: Date,
     },
     { timestamps: true }
 );

@@ -38,6 +38,12 @@ const blockSchema = new mongoose.Schema(
             }
         ],
 
+        roomId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Room",
+            default: null
+        },
+
         startDate: {
             type: Date,
             required: function () {
@@ -75,6 +81,10 @@ const blockSchema = new mongoose.Schema(
         isExpired: {
             type: Boolean
         },
+
+        startTime: { type: String },
+
+        endTime: { type: String },
 
     },
     { timestamps: true }

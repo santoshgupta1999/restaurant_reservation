@@ -1,39 +1,37 @@
 const cron = require("node-cron");
+const moment = require("moment");
+
 const Table = require("../models/table.model");
-const Reservation = require("../models/reservation.model");
 
 cron.schedule("0 2 * * *", async () => {
     console.log("Running auto-unlock job...");
 
     try {
 
-        const yesterdayEnd = new Date();
-        yesterdayEnd.setDate(yesterdayEnd.getDate() - 1);
-        yesterdayEnd.setHours(23, 59, 59, 999);
+        const todayStart = moment().startOf("day");
 
-        const lockedTables = await Table.find({
+        const tablesToUnlock = await Table.find({
             status: "OutOfService",
-            lockedAt: { $lte: yesterdayEnd }
-        });
+            lockedAt: { $lt: todayStart.toDate() }
+        }).select("_id");
 
-        for (let table of lockedTables) {
+        if (!tablesToUnlock.length) return;
 
-            const futureBooking = await Reservation.findOne({
-                tableId: table._id,
-                date: { $gt: new Date() },
-                status: { $in: ["Pending", "Confirmed"] }
-            });
+        const tableIds = tablesToUnlock.map(t => t._id);
 
-            if (futureBooking) {
-                table.status = "Available";
-                table.lockReason = null;
-                table.lockedBy = null;
-                table.lockedAt = null;
-
-                await table.save();
-                console.log(`Auto unlocked table ${table._id}`);
+        await Table.updateMany(
+            { _id: { $in: tableIds } },
+            {
+                $set: { status: "Available" },
+                $unset: {
+                    lockReason: "",
+                    lockedBy: "",
+                    lockedAt: ""
+                }
             }
-        }
+        );
+
+        console.log(`Auto unlocked ${tableIds.length} table(s)`);
 
     } catch (error) {
         console.error("Auto unlock error:", error);

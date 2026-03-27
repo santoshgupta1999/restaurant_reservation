@@ -3,7 +3,13 @@ const Counter = require("./Counter");
 
 function capitalize(value) {
     if (!value) return value;
-    return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+
+    return value
+        .toLowerCase()
+        .trim()
+        .split(/\s+/)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
 }
 
 const guestSchema = new mongoose.Schema(
@@ -31,7 +37,11 @@ const guestSchema = new mongoose.Schema(
             type: Boolean,
             default: false
         },
-        email: { type: String },
+        email: {
+            type: String,
+            lowercase: true,
+            trim: true
+        },
         phone: { type: String },
         countryCode: {
             type: String,
@@ -58,6 +68,16 @@ const guestSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
+guestSchema.index(
+    { restaurantId: 1, email: 1 },
+    { unique: true, sparse: true }
+);
+
+guestSchema.index(
+    { restaurantId: 1, phone: 1 },
+    { unique: true, sparse: true }
+);
+
 guestSchema.pre("save", async function (next) {
     // agar remiId already hai → skip
     if (this.remiId) return next();
@@ -69,7 +89,7 @@ guestSchema.pre("save", async function (next) {
             { new: true, upsert: true }
         );
 
-        this.remiId = `RU-${String(counter.seq).padStart(3, "0")}`;
+        this.remiId = `RU-${String(counter.seq).padStart(6, "0")}`;
         next();
     } catch (err) {
         next(err);

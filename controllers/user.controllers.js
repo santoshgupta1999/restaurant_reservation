@@ -9,6 +9,8 @@ const fs = require('fs');
 const mongoose = require('mongoose');
 const BlacklistToken = require("../models/blacklistToken.model");
 const crypto = require("crypto");
+const moment = require("moment-timezone");
+const { formatDateTime } = require("../utils/dateFormatter");
 
 
 exports.register = async (req, res) => {
@@ -81,6 +83,15 @@ exports.login = async (req, res) => {
             return res.status(404).json({
                 success: false,
                 message: "User not found. Please register first.",
+            });
+        }
+
+        const allowedRoles = ["Admin", "Host", "Manager", "Call Center"];
+
+        if (!allowedRoles.includes(user.role)) {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied. You are not allowed to login.",
             });
         }
 
@@ -204,6 +215,7 @@ exports.getProfile = async (req, res) => {
         }
 
         const user = await User.findById(userId).select("-password");
+
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -211,10 +223,7 @@ exports.getProfile = async (req, res) => {
             });
         }
 
-        const host = `${req.protocol}://${req.get("host")}`;
-        const imageUrl = user.profileImage
-            ? `${host}/restaurant_reservation/uploads/users/${user.profileImage}`
-            : null;
+        const imageUrl = user.profileImage ? user.profileImage : null;
 
         return res.status(200).json({
             success: true,
@@ -226,7 +235,7 @@ exports.getProfile = async (req, res) => {
                 phone: user.phone,
                 role: user.role,
                 isActive: user.isActive,
-                lastLogin: user.lastLogin ? user.lastLogin.toISOString() : null,
+                lastLogin: formatDateTime(user.lastLogin),
                 imageUrl
             }
         });
@@ -282,7 +291,7 @@ exports.updateProfile = async (req, res) => {
         await user.save();
 
         const imageUrl = user.profileImage
-            ? `${req.protocol}://${req.get("host")}/uploads/users/${user.profileImage}`
+            ? `${user.profileImage}`
             : null;
 
         return res.status(200).json({
@@ -890,7 +899,7 @@ exports.getStaffs = async (req, res) => {
         const { restaurantId } = req.query;
 
         const filter = {
-            role: { $in: ["Host", "Manager"] },
+            role: { $in: ["Host", "Manager", "Call Center"] },
         };
 
         if (restaurantId) {
@@ -917,11 +926,21 @@ exports.getStaffs = async (req, res) => {
             });
         }
 
+        const formattedStaffs = staffs.map(user => {
+            const obj = user.toObject();
+
+            obj.lastLogin = obj.lastLogin
+                ? moment(obj.lastLogin).format("DD MMM YYYY, hh:mm A")
+                : null;
+
+            return obj;
+        });
+
         return res.status(200).json({
             success: true,
             message: "Staffs fetched successfully",
-            count: staffs.length,
-            data: staffs
+            count: formattedStaffs.length,
+            data: formattedStaffs
         });
 
     } catch (error) {
@@ -1010,7 +1029,7 @@ exports.addStaff = async (req, res) => {
     try {
         const { id, email, password, role, restaurantId, isActive } = req.body;
 
-        const allowedRoles = ["Host", "Manager"];
+        const allowedRoles = ["Host", "Manager", "Call Center"];
 
         if (!email) {
             return res.status(400).json({
@@ -1040,7 +1059,7 @@ exports.addStaff = async (req, res) => {
             if (!allowedRoles.includes(role)) {
                 return res.status(400).json({
                     success: false,
-                    message: "Role must be either Host or Manager"
+                    message: "Role must be either Host , Manager or Call Center"
                 });
             }
 
@@ -1153,6 +1172,174 @@ exports.addStaff = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Something went wrong",
+            error: error.message
+        });
+    }
+};
+
+exports.getUserRoleCounts = async (req, res) => {
+    try {
+
+        const counts = await User.aggregate([
+            {
+                $group: {
+                    _id: "$role",
+                    count: { $sum: 1 }
+                }
+            }
+        ]);
+
+        const result = {
+            Manager: 0,
+            super_admin: 0,
+            Host: 0,
+            call_center: 0,
+            Admin: 0
+        };
+
+        counts.forEach(item => {
+
+            if (item._id === "Call Center") {
+                result.call_center = item.count;
+            }
+            else if (result.hasOwnProperty(item._id)) {
+                result[item._id] = item.count;
+            }
+
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "User role counts fetched successfully",
+            data: result
+        });
+
+    } catch (error) {
+        console.error("Role count error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching role counts",
+            error: error.message
+        });
+    }
+};
+
+exports.createSuperAdmin = async (req, res) => {
+    try {
+        const { name, email, password, isActive = true } = req.body;
+
+
+        if (!name || !email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: "name, email and password are required"
+            });
+        }
+
+        if (password.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: "Password must be at least 6 characters"
+            });
+        }
+
+        /* ================= CHECK EXISTING USER ================= */
+
+        const existingUser = await User.findOne({ email });
+
+        if (existingUser) {
+            return res.status(409).json({
+                success: false,
+                message: "Email already exists"
+            });
+        }
+
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+
+        const user = await User.create({
+            name,
+            email,
+            password: hashedPassword,
+            role: "super_admin",
+            isActive
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Super Admin created successfully",
+            data: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                isActive: user.isActive
+            }
+        });
+
+    } catch (error) {
+        console.error("Create super admin error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error creating super admin",
+            error: error.message
+        });
+    }
+};
+
+exports.getSuperAdmins = async (req, res) => {
+    try {
+
+        const { search = "", status, sortBy = "createdAt", order = "desc" } = req.query;
+
+        const sortOrder = order === "asc" ? 1 : -1;
+
+        /* ================= FILTER ================= */
+        let match = {
+            role: "super_admin"
+        };
+
+        if (status !== undefined) {
+            match.isActive = status === "true";
+        }
+
+        if (search) {
+            match.$or = [
+                { name: { $regex: search, $options: "i" } },
+                { email: { $regex: search, $options: "i" } }
+            ];
+        }
+
+        /* ================= FETCH USERS ================= */
+        const users = await User.find(match)
+            .select("name email role lastLogin isActive createdAt")
+            .sort({ [sortBy]: sortOrder });
+
+        /* ================= FORMAT RESPONSE ================= */
+        const formatted = users.map(u => ({
+            id: u._id,
+            name: u.name,
+            email: u.email,
+            role: "Super Admin",
+            status: u.isActive ? "Active" : "Inactive",
+            lastLogin: u.lastLogin
+                ? moment(u.lastLogin).format("DD MMM YYYY, hh:mm A")
+                : null
+        }));
+
+        return res.status(200).json({
+            success: true,
+            message: "Super Admin list fetched successfully",
+            total: formatted.length,
+            data: formatted
+        });
+
+    } catch (error) {
+        console.error("Super Admin list error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching super admin list",
             error: error.message
         });
     }

@@ -1,22 +1,23 @@
 const { body } = require("express-validator");
 
 exports.blockValidator = [
+
     body("restaurantId")
         .notEmpty().withMessage("restaurantId is required")
         .isMongoId().withMessage("Invalid restaurantId"),
 
     body("reason")
         .notEmpty().withMessage("reason is required")
-        .withMessage("Invalid reason")
         .isLength({ min: 3, max: 60 })
-        .withMessage("roomName must be between 3 and 60 characters"),
+        .withMessage("reason must be between 3 and 60 characters"),
 
     body("status")
         .optional()
         .isIn(["Draft", "Active"])
         .withMessage("status must be Draft or Active"),
 
-    // startDate & endDate only REQUIRED if status !== Draft
+    /* ================= DATE ================= */
+
     body("startDate")
         .if(body("status").not().equals("Draft"))
         .notEmpty().withMessage("startDate is required")
@@ -27,15 +28,17 @@ exports.blockValidator = [
         .notEmpty().withMessage("endDate is required")
         .isISO8601().withMessage("Invalid endDate"),
 
+    /* ================= BLOCK TYPE ================= */
+
     body("isFullRestaurantBlock")
         .optional()
-        .isBoolean().withMessage("isFullRestaurantBlock must be boolean"),
+        .isBoolean()
+        .withMessage("isFullRestaurantBlock must be boolean"),
 
-    // body("roomName")
-    //     .optional()
-    //     .isString()
-    //     .isLength({ min: 3, max: 60 })
-    //     .withMessage("roomName must be between 3 and 60 characters"),
+    body("roomId")
+        .optional({ nullable: true })
+        .isMongoId()
+        .withMessage("Invalid roomId"),
 
     body("tableIds")
         .optional()
@@ -64,71 +67,90 @@ exports.blockValidator = [
 
     body("note")
         .optional()
-        .isString(),
+        .isString()
+        .withMessage("note must be a string"),
+
+    /* ================= CUSTOM LOGIC ================= */
 
     body().custom((value) => {
-        const { status, isFullRestaurantBlock, roomName, tableIds } = value;
+        const { status, isFullRestaurantBlock, roomId, tableIds } = value;
 
         if (status === "Draft") return true;
 
         if (isFullRestaurantBlock) return true;
-        if (roomName) return true;
+        if (roomId) return true;
         if (tableIds && tableIds.length > 0) return true;
 
         throw new Error(
-            "Provide isFullRestaurantBlock=true OR roomName OR tableIds[]"
+            "Provide isFullRestaurantBlock=true OR roomId OR tableIds[]"
         );
-    }),
+    })
 ];
 
-
 exports.updateBlockValidator = [
-    body("restaurantId").optional().isMongoId(),
+
+    body("restaurantId")
+        .optional()
+        .isMongoId()
+        .withMessage("Invalid restaurantId"),
 
     body("reason")
         .optional()
-        .isIn(["Maintenance", "Closed", "Day Off"]),
+        .isLength({ min: 3, max: 60 })
+        .withMessage("reason must be between 3 and 60 characters"),
 
     body("status")
         .optional()
-        .isIn(["Draft", "Active", "Ended"])
+        .isIn(["Draft", "Active", "Expired"])
         .withMessage("Invalid status"),
 
     body("startDate")
         .optional()
-        .isISO8601(),
+        .isISO8601()
+        .withMessage("Invalid startDate"),
 
     body("endDate")
         .optional()
-        .isISO8601(),
+        .isISO8601()
+        .withMessage("Invalid endDate"),
 
     body("isFullRestaurantBlock")
         .optional()
-        .isBoolean(),
+        .isBoolean()
+        .withMessage("isFullRestaurantBlock must be boolean"),
 
-    body("roomName")
-        .optional()
-        .isString(),
+    body("roomId")
+        .optional({ nullable: true })
+        .isMongoId()
+        .withMessage("Invalid roomId"),
 
     body("tableIds")
         .optional()
-        .isArray(),
+        .isArray()
+        .withMessage("tableIds must be an array"),
+
     body("tableIds.*")
         .optional()
-        .isMongoId(),
+        .isMongoId()
+        .withMessage("Invalid tableId"),
 
     body("shiftIds")
         .optional()
-        .isArray(),
+        .isArray()
+        .withMessage("shiftIds must be an array"),
+
     body("shiftIds.*")
         .optional()
-        .isMongoId(),
+        .isMongoId()
+        .withMessage("Invalid shiftId"),
 
     body("daysActive")
         .optional()
-        .isArray(),
+        .isArray()
+        .withMessage("daysActive must be an array"),
 
     body("note")
         .optional()
         .isString()
+        .withMessage("note must be a string")
 ];
