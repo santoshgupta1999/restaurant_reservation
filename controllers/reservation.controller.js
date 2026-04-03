@@ -130,6 +130,8 @@ exports.createReservation = async (req, res) => {
             }
         }
 
+        /* ================= SHIFT (OPTIONAL NOW) ================= */
+
         const shortDay = reservationDate.toLocaleDateString("en-US", {
             weekday: "short"
         });
@@ -159,60 +161,53 @@ exports.createReservation = async (req, res) => {
             ]
         });
 
-        if (!allShifts.length) {
-            return res.status(400).json({
-                success: false,
-                message: "No shifts available for this day."
+        let shift = null;
+
+        if (allShifts.length) {
+            const [hh, mm] = formattedTime.split(":").map(Number);
+            const reservationMinutes = hh * 60 + mm;
+
+            const convertToMinutes = t => {
+                const [h, m] = t.split(":").map(Number);
+                return h * 60 + m;
+            };
+
+            shift = allShifts.find(s => {
+                const start = convertToMinutes(s.startTime);
+                const end = convertToMinutes(s.endTime);
+
+                // 🔥 overnight support
+                if (end < start) {
+                    return reservationMinutes >= start || reservationMinutes < end;
+                }
+
+                return reservationMinutes >= start && reservationMinutes < end;
             });
         }
 
-        const [hh, mm] = formattedTime.split(":").map(Number);
-        const reservationMinutes = hh * 60 + mm;
+        /* ❌ REMOVED HARD ERROR
+        if (!shift) return error
+        */
 
-        const convertToMinutes = t => {
-            const [h, m] = t.split(":").map(Number);
-            return h * 60 + m;
-        };
-
-        let shift = allShifts.find(s => {
-            const start = convertToMinutes(s.startTime);
-            const end = convertToMinutes(s.endTime);
-            return reservationMinutes >= start && reservationMinutes < end;
-        });
-
-        if (!shift) {
-            return res.status(400).json({
-                success: false,
-                message: "Reservation time is outside all shift timings."
-            });
-        }
+        /* ================= TABLE VALIDATION ================= */
 
         if (tableId) {
             const table = await Table.findById(tableId);
 
-            // if (!table) {
-            //     return res.status(404).json({
-            //         success: false,
-            //         message: "Table not found."
-            //     });
-            // }
-
-            if (table.status === "OutOfService") {
+            if (table?.status === "OutOfService") {
                 return res.status(400).json({
                     success: false,
-                    message: "This table is currently locked (Out of Service). Please choose another table."
+                    message: "This table is currently locked (Out of Service)."
                 });
             }
 
-            if (partySize > table.capacity) {
+            if (table && partySize > table.capacity) {
                 return res.status(400).json({
                     success: false,
                     message: "Party size exceeds table capacity."
                 });
             }
-        }
 
-        if (tableId) {
             const existingBooking = await Reservation.findOne({
                 restaurantId,
                 tableId,
@@ -230,30 +225,7 @@ exports.createReservation = async (req, res) => {
             }
         }
 
-        const conflictingBlock = await Block.findOne({
-            restaurantId,
-            status: "Active",
-            isExpired: false,
-            startDate: { $lte: reservationDate },
-            endDate: { $gte: reservationDate },
-            $or: [
-                { isFullRestaurantBlock: true },
-                tableId ? { tableIds: tableId } : {},
-                shift ? { shiftIds: shift._id } : {}
-            ]
-        });
-
-        if (conflictingBlock) {
-            return res.status(400).json({
-                success: false,
-                message: `This table is not available from ${conflictingBlock.startDate.toDateString()} to ${conflictingBlock.endDate.toDateString()}. Please choose another table.`,
-                block: {
-                    reason: conflictingBlock.reason,
-                    startDate: conflictingBlock.startDate,
-                    endDate: conflictingBlock.endDate
-                }
-            });
-        }
+        /* ================= GUEST ================= */
 
         let guest = null;
 
@@ -274,7 +246,11 @@ exports.createReservation = async (req, res) => {
             guest.phone = guestPhone || guest.phone;
             guest.countryCode = countryCode || guest.countryCode;
             guest.email = guestEmail || guest.email;
-            guest.gender = gender || guest.gender;
+
+            if (gender && ["Male", "Female", "Other", "Prefer not to say", "N/A"].includes(gender)) {
+                guest.gender = gender;
+            }
+
             guest.dob = dob || guest.dob;
 
             await guest.save();
@@ -286,12 +262,14 @@ exports.createReservation = async (req, res) => {
                 phone: guestPhone,
                 countryCode,
                 email: guestEmail,
-                gender,
+                gender: ["Male", "Female", "Other", "Prefer not to say", "N/A"].includes(gender) ? gender : undefined,
                 dob,
                 tags,
                 notes
             });
         }
+
+        /* ================= CREATE / UPDATE ================= */
 
         let statusChanged = false;
         let reservation;
@@ -299,7 +277,6 @@ exports.createReservation = async (req, res) => {
 
         if (existingReservation) {
 
-            // check if important fields changed
             if (
                 existingReservation.date.toISOString() !== reservationDate.toISOString() ||
                 existingReservation.time !== formattedTime ||
@@ -311,18 +288,19 @@ exports.createReservation = async (req, res) => {
                 isUpdate = true;
             }
 
-            if (["Finished", "No-show", "Cancelled"].includes(existingReservation.status)) {
+            if (["Finished", "No-Show", "Cancelled"].includes(existingReservation.status)) {
                 return res.status(400).json({
                     success: false,
                     message: `${existingReservation.status} reservation cannot be modified.`
                 });
             }
+
             if (status && existingReservation.status !== status) {
                 statusChanged = true;
             }
-            // UPDATE
+
             existingReservation.tableId = tableId || existingReservation.tableId;
-            existingReservation.shiftId = shift._id;
+            existingReservation.shiftId = shift?._id || null; // ✅ SAFE
             existingReservation.date = reservationDate;
             existingReservation.time = formattedTime;
             existingReservation.partySize = partySize;
@@ -336,12 +314,12 @@ exports.createReservation = async (req, res) => {
             reservation = await existingReservation.save();
 
         } else {
-            // CREATE
+
             reservation = await Reservation.create({
                 restaurantId,
                 guestId: guest._id,
-                tableId,
-                shiftId: shift._id,
+                tableId: tableId || null, // ✅ table optional
+                shiftId: shift?._id || null, // ✅ shift optional
                 date: reservationDate,
                 time: formattedTime,
                 partySize,
@@ -362,22 +340,21 @@ exports.createReservation = async (req, res) => {
             upcomingVisitAt: reservationDate
         });
 
+        /* ================= NOTIFICATION ================= */
+
         if (existingReservation) {
 
             if (reservation.status === "Cancelled" && statusChanged) {
-                console.log("SEND CANCELLED");
                 sendReservationNotification(reservation, guest, "Cancelled");
             }
 
             else if (reservation.status === "Confirmed") {
 
                 if (statusChanged) {
-                    console.log("SEND CONFIRMED");
                     sendReservationNotification(reservation, guest, "Confirmed");
                 }
 
                 else if (isUpdate) {
-                    console.log("SEND UPDATED");
                     sendReservationNotification(reservation, guest, "Updated");
                 }
             }
@@ -385,7 +362,6 @@ exports.createReservation = async (req, res) => {
         } else {
 
             if (["Confirmed", "Cancelled"].includes(reservation.status)) {
-                console.log("SEND NEW");
                 sendReservationNotification(reservation, guest, reservation.status);
             }
         }
@@ -400,6 +376,7 @@ exports.createReservation = async (req, res) => {
 
     } catch (error) {
         console.error("Error saving reservation:", error);
+
         return res.status(500).json({
             success: false,
             message: "Error saving reservation.",
@@ -730,7 +707,7 @@ exports.updateReservationById = async (req, res) => {
                 tableId: updateData.tableId || reservation.tableId,
                 date: finalDate,
                 time: finalTime,
-                status: { $nin: ["Canceled", "No-show"] }
+                status: { $nin: ["Canceled", "No-Show"] }
             });
 
             if (clash) {
@@ -778,7 +755,7 @@ exports.updateReservationStatus = async (req, res) => {
         const { id } = req.params;
         const { status } = req.body;
 
-        const allowedStatuses = ["Pending", "Confirmed", "Seated", "Cancelled", "No-show", "Finished"];
+        const allowedStatuses = ["Pending", "Confirmed", "Seated", "Cancelled", "No-Show", "Finished"];
 
         if (!id || id.length !== 24) {
             return res.status(400).json({
@@ -851,7 +828,7 @@ exports.cancelReservation = async (req, res) => {
             });
         }
 
-        const restrictedStatuses = ["Cancelled", "Finished", "Seated", "No-show"];
+        const restrictedStatuses = ["Cancelled", "Finished", "Seated", "No-Show"];
 
         if (restrictedStatuses.includes(reservation.status)) {
             return res.status(400).json({
@@ -940,18 +917,17 @@ exports.createWidgetReservation = async (req, res) => {
         const {
             reservationId,
             tableId,
-
             firstName,
             lastName,
             guestEmail,
             guestPhone,
             countryCode,
             dob,
-
+            gender,
             date,
             time,
             partySize,
-            source,
+            source = "Online",
             status,
             seating,
             tags,
@@ -994,6 +970,8 @@ exports.createWidgetReservation = async (req, res) => {
                 });
             }
         }
+
+        /* ================= SHIFT FIND ================= */
 
         const shortDay = reservationDate.toLocaleDateString("en-US", {
             weekday: "short"
@@ -1040,36 +1018,31 @@ exports.createWidgetReservation = async (req, res) => {
         };
 
         let shift = allShifts.find(s => {
-            const start = convertToMinutes(s.startTime);
-            const end = convertToMinutes(s.endTime);
-            return reservationMinutes >= start && reservationMinutes < end;
+            let start = convertToMinutes(s.startTime);
+            let end = convertToMinutes(s.endTime);
+
+            // Overnight shift support
+            if (end <= start) end += 1440;
+
+            let checkTime = reservationMinutes;
+            if (checkTime < start) checkTime += 1440;
+
+            return checkTime >= start && checkTime < end;
         });
 
-        if (!shift) {
-            return res.status(400).json({
-                success: false,
-                message: "Reservation time is outside all shift timings."
-            });
-        }
+        /* ================= TABLE VALIDATION ================= */
 
         if (tableId) {
             const table = await Table.findById(tableId);
 
-            // if (!table) {
-            //     return res.status(404).json({
-            //         success: false,
-            //         message: "Table not found."
-            //     });
-            // }
-
-            if (table.status === "OutOfService") {
+            if (table?.status === "OutOfService") {
                 return res.status(400).json({
                     success: false,
-                    message: "This table is currently locked (Out of Service). Please choose another table."
+                    message: "This table is currently locked (Out of Service)."
                 });
             }
 
-            if (partySize > table.capacity) {
+            if (table && partySize > table.capacity) {
                 return res.status(400).json({
                     success: false,
                     message: "Party size exceeds table capacity."
@@ -1077,12 +1050,14 @@ exports.createWidgetReservation = async (req, res) => {
             }
         }
 
+        /* ================= DUPLICATE BOOKING ================= */
+
         if (tableId) {
             const existingBooking = await Reservation.findOne({
                 restaurantId,
                 tableId,
                 date: reservationDate,
-                time,
+                time: formattedTime,
                 status: { $in: ["Pending", "Confirmed", "Seated"] },
                 _id: { $ne: reservationId }
             });
@@ -1090,35 +1065,12 @@ exports.createWidgetReservation = async (req, res) => {
             if (existingBooking) {
                 return res.status(400).json({
                     success: false,
-                    message: "This table is already booked for selected Date & Time."
+                    message: "This table is already booked."
                 });
             }
         }
 
-        const conflictingBlock = await Block.findOne({
-            restaurantId,
-            status: "Active",
-            isExpired: false,
-            startDate: { $lte: reservationDate },
-            endDate: { $gte: reservationDate },
-            $or: [
-                { isFullRestaurantBlock: true },
-                tableId ? { tableIds: tableId } : {},
-                shift ? { shiftIds: shift._id } : {}
-            ]
-        });
-
-        if (conflictingBlock) {
-            return res.status(400).json({
-                success: false,
-                message: `This table is not available from ${conflictingBlock.startDate.toDateString()} to ${conflictingBlock.endDate.toDateString()}. Please choose another table.`,
-                block: {
-                    reason: conflictingBlock.reason,
-                    startDate: conflictingBlock.startDate,
-                    endDate: conflictingBlock.endDate
-                }
-            });
-        }
+        /* ================= GUEST ================= */
 
         let guest = null;
 
@@ -1140,6 +1092,7 @@ exports.createWidgetReservation = async (req, res) => {
             guest.countryCode = countryCode || guest.countryCode;
             guest.email = guestEmail || guest.email;
             guest.dob = dob || guest.dob;
+            guest.gender = gender || guest.gender;
 
             await guest.save();
         } else {
@@ -1151,6 +1104,7 @@ exports.createWidgetReservation = async (req, res) => {
                 countryCode,
                 email: guestEmail,
                 dob,
+                gender,
                 tags,
                 notes
             });
@@ -1327,9 +1281,10 @@ exports.getReservationConfirmation = async (req, res) => {
             booking: {
                 reservationNo: reservation.reservationNo,
                 date: reservation.date,
-                time: reservation.time,
+                time: convertTo12Hour(reservation.time),
                 partySize: reservation.partySize,
-                status: reservation.status
+                status: reservation.status,
+                seating: reservation.seating
             },
 
             restaurant: {
@@ -1351,7 +1306,7 @@ exports.getReservationConfirmation = async (req, res) => {
             calendar: {
                 title: `Reservation at ${restaurant?.venueName}`,
                 date: reservation.date,
-                time: reservation.time
+                time: convertTo12Hour(reservation.time)
             }
         };
 

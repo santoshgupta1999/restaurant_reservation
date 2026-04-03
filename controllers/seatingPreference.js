@@ -2,6 +2,11 @@ const SeatingPreference = require("../models/SeatingPreference");
 const StaffAccount = require("../models/staffAccount");
 const Room = require('../models/room.model');
 const bcrypt = require("bcrypt");
+const moment = require("moment");
+const {
+    formatDate,
+    formatTime
+} = require("../utils/dateFormatter");
 
 // exports.addSeatingPreference = async (req, res) => {
 //     try {
@@ -79,6 +84,7 @@ exports.addSeatingPreference = async (req, res) => {
         const {
             id, // optional
             preferenceName,
+            restaurantId,
             startDate,
             endDate,
             activeDays,
@@ -92,6 +98,7 @@ exports.addSeatingPreference = async (req, res) => {
         /* ================= BASIC VALIDATION ================= */
         if (
             !preferenceName ||
+            !restaurantId ||
             !startDate ||
             (!indefinite && !endDate) || // only require endDate if NOT indefinite
             !activeDays ||
@@ -140,6 +147,23 @@ exports.addSeatingPreference = async (req, res) => {
             });
         }
 
+        const duplicateQuery = {
+            restaurantId,
+            preferenceName: preferenceName.trim()
+        };
+
+        if (id) {
+            duplicateQuery._id = { $ne: id };
+        }
+
+        const existing = await SeatingPreference.findOne(duplicateQuery);
+
+        if (existing) {
+            return res.status(400).json({
+                success: false,
+                message: "Preference name already exists."
+            });
+        }
 
         /* ================= UPDATE (ID EXISTS) ================= */
         if (id) {
@@ -153,6 +177,7 @@ exports.addSeatingPreference = async (req, res) => {
             }
 
             existingPreference.preferenceName = preferenceName.trim();
+            existingPreference.restaurantId = restaurantId;
             existingPreference.startDate = startDate;
             existingPreference.endDate = indefinite ? null : endDate; // null for indefinite
             existingPreference.indefinite = indefinite ? true : false; // null for indefinite
@@ -174,6 +199,7 @@ exports.addSeatingPreference = async (req, res) => {
         /* ================= CREATE (NO ID) ================= */
         const newPreference = await SeatingPreference.create({
             preferenceName: preferenceName.trim(),
+            restaurantId,
             startDate,
             endDate: indefinite ? null : endDate, // null if indefinite
             indefinite: indefinite ? true : false,
@@ -283,36 +309,53 @@ exports.toggleSeatingPreferenceStatus = async (req, res) => {
 
 exports.getAllPreference = async (req, res) => {
     try {
-        const preferences = await SeatingPreference.find()
-            .sort({ createdAt: 1 })
-            .select("-createdAt -updatedAt -__v")
+        const { restaurantId } = req.body;
 
+        /* ================= VALIDATION ================= */
+        if (!restaurantId) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId is required"
+            });
+        }
+
+        /* ================= FETCH DATA ================= */
+        const preferences = await SeatingPreference.find({
+            restaurantId
+        })
+            .sort({ createdAt: 1 })
+            .select("-createdAt -updatedAt -__v");
+
+        /* ================= FORMAT RESPONSE ================= */
         const formattedPrefences = preferences.map((p) => ({
             _id: p._id,
             preferenceName: p.preferenceName,
-            startDate: p.startDate
-                ? p.startDate.toISOString().split("T")[0]
-                : null,
-            endDate: p.endDate
-                ? p.endDate.toISOString().split("T")[0]
-                : null,
+
+            startDate: formatDate(p.startDate),
+            endDate: p.indefinite ? null : formatDate(p.endDate),
+
             indefinite: p.indefinite,
             activeDays: p.activeDays,
-            firstBookingTime: p.firstBookingTime,
-            lastBookingTime: p.lastBookingTime,
+
+            firstBookingTime: formatTime(p.firstBookingTime),
+            lastBookingTime: formatTime(p.lastBookingTime),
+
             tableAssignment: p.tableAssignment,
-            status: p.status
+            status: p.status,
+            restaurantId: p.restaurantId
         }));
 
+        /* ================= RESPONSE ================= */
         return res.status(200).json({
             success: true,
             message: "Seating preferences fetched successfully",
             count: formattedPrefences.length,
-            data: formattedPrefences,
-
+            data: formattedPrefences
         });
 
     } catch (error) {
+        console.error("getAllPreference error:", error);
+
         return res.status(500).json({
             success: false,
             message: error.message || "Internal server error"
@@ -524,6 +567,230 @@ exports.getRoomsByRestaurant = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Error fetching rooms",
+            error: error.message
+        });
+    }
+};
+
+const DEFAULT_TIMEZONE = process.env.APP_TIMEZONE || "Asia/Kolkata";
+
+exports.getSeatingPrefrencesName = async (req, res) => {
+    try {
+        const { restaurantId, date, time } = req.body;
+
+        /* ================= VALIDATION ================= */
+        if (!restaurantId || !date || !time) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId, date and time are required"
+            });
+        }
+
+        /* ================= PARSE INPUT ================= */
+
+        const selectedDate = moment.tz(
+            date,
+            ["DD/MM/YYYY", "YYYY-MM-DD"],
+            true,
+            DEFAULT_TIMEZONE
+        );
+
+        if (!selectedDate.isValid()) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid date format"
+            });
+        }
+
+        const selectedTime = moment(
+            time,
+            ["hh:mm A", "HH:mm"],
+            true
+        ).format("HH:mm");
+
+        const selectedDay = selectedDate.format("dd"); // Mo, Tu
+
+        /* ================= FETCH DATA ================= */
+
+        const preferences = await SeatingPreference.find({
+            restaurantId,
+            status: "Active"
+        }).select(
+            "_id preferenceName startDate endDate indefinite activeDays firstBookingTime lastBookingTime"
+        );
+
+        /* ================= FILTER ================= */
+
+        const filtered = preferences.filter(p => {
+
+            /* ---------- DATE CHECK ---------- */
+            const start = moment(p.startDate).tz(DEFAULT_TIMEZONE);
+            const end = p.indefinite
+                ? null
+                : moment(p.endDate).tz(DEFAULT_TIMEZONE);
+
+            const isDateValid = p.indefinite
+                ? selectedDate.isSameOrAfter(start, "day")
+                : selectedDate.isBetween(start, end, "day", "[]");
+
+            if (!isDateValid) return false;
+
+            /* ---------- DAY CHECK ---------- */
+            if (p.activeDays?.length && !p.activeDays.includes(selectedDay)) {
+                return false;
+            }
+
+            /* ---------- TIME CHECK ---------- */
+            const startTime = moment(
+                p.firstBookingTime,
+                ["hh:mm A", "HH:mm"]
+            );
+
+            const endTime = moment(
+                p.lastBookingTime,
+                ["hh:mm A", "HH:mm"]
+            );
+
+            const currentTime = moment(selectedTime, "HH:mm");
+
+            if (!currentTime.isBetween(startTime, endTime, null, "[]")) {
+                return false;
+            }
+
+            return true;
+        });
+
+        /* ================= RESPONSE ================= */
+
+        const response = filtered.map(p => ({
+            id: p._id,
+            preferenceName: p.preferenceName
+        }));
+
+        return res.status(200).json({
+            success: true,
+            count: response.length,
+            data: response
+        });
+
+    } catch (error) {
+        console.error("Seating preference fetch error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching seating preferences",
+            error: error.message
+        });
+    }
+};
+
+exports.getwidgetSeatingPrefrencesName = async (req, res) => {
+    try {
+
+        const { restaurantId } = req.params;
+        const { date, time } = req.body;
+
+        /* ================= VALIDATION ================= */
+        if (!restaurantId || !date || !time) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId, date and time are required"
+            });
+        }
+
+        /* ================= PARSE INPUT ================= */
+
+        const selectedDate = moment.tz(
+            date,
+            ["DD/MM/YYYY", "YYYY-MM-DD"],
+            true,
+            DEFAULT_TIMEZONE
+        );
+
+        if (!selectedDate.isValid()) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid date format"
+            });
+        }
+
+        const selectedTime = moment(
+            time,
+            ["hh:mm A", "HH:mm"],
+            true
+        ).format("HH:mm");
+
+        const selectedDay = selectedDate.format("dd"); // Mo, Tu
+
+        /* ================= FETCH DATA ================= */
+
+        const preferences = await SeatingPreference.find({
+            restaurantId,
+            status: "Active"
+        }).select(
+            "_id preferenceName startDate endDate indefinite activeDays firstBookingTime lastBookingTime"
+        );
+
+        /* ================= FILTER ================= */
+
+        const filtered = preferences.filter(p => {
+
+            /* ---------- DATE CHECK ---------- */
+            const start = moment(p.startDate).tz(DEFAULT_TIMEZONE);
+            const end = p.indefinite
+                ? null
+                : moment(p.endDate).tz(DEFAULT_TIMEZONE);
+
+            const isDateValid = p.indefinite
+                ? selectedDate.isSameOrAfter(start, "day")
+                : selectedDate.isBetween(start, end, "day", "[]");
+
+            if (!isDateValid) return false;
+
+            /* ---------- DAY CHECK ---------- */
+            if (p.activeDays?.length && !p.activeDays.includes(selectedDay)) {
+                return false;
+            }
+
+            /* ---------- TIME CHECK ---------- */
+            const startTime = moment(
+                p.firstBookingTime,
+                ["hh:mm A", "HH:mm"]
+            );
+
+            const endTime = moment(
+                p.lastBookingTime,
+                ["hh:mm A", "HH:mm"]
+            );
+
+            const currentTime = moment(selectedTime, "HH:mm");
+
+            if (!currentTime.isBetween(startTime, endTime, null, "[]")) {
+                return false;
+            }
+
+            return true;
+        });
+
+        /* ================= RESPONSE ================= */
+
+        const response = filtered.map(p => ({
+            id: p._id,
+            preferenceName: p.preferenceName
+        }));
+
+        return res.status(200).json({
+            success: true,
+            count: response.length,
+            data: response
+        });
+
+    } catch (error) {
+        console.error("Seating preference fetch error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching seating preferences",
             error: error.message
         });
     }

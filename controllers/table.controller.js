@@ -921,7 +921,7 @@ exports.getAvailableTables = async (req, res) => {
             date: reservationDate,
             "slot.startTime": shift.startTime,
             "slot.endTime": shift.endTime,
-            status: { $nin: ["Cancelled", "No-show"] },
+            status: { $nin: ["Cancelled", "No-Show"] },
         }).select("tableId");
 
         const reservedIds = reservedTables.map(r => r.tableId.toString());
@@ -1772,30 +1772,26 @@ exports.changeTableAssignment = async (req, res) => {
 
 exports.getAvailableTable = async (req, res) => {
     try {
-        const { restaurantId, date, time, partySize } = req.body;
+        const { restaurantId, date, time, partySize = 1 } = req.body;
 
-        if (!restaurantId) {
+        /* ================= VALIDATION ================= */
+
+        if (!restaurantId || !date || !time) {
             return res.status(400).json({
                 success: false,
-                message: "restaurantId is required"
+                message: "restaurantId, date & time are required"
             });
         }
 
-        if (!partySize || partySize <= 0) {
+        if (partySize <= 0) {
             return res.status(400).json({
                 success: false,
                 message: "Valid partySize is required"
             });
         }
 
-        if (!date || !time) {
-            return res.status(400).json({
-                success: false,
-                message: "date and time are required"
-            });
-        }
-
         const selectedDate = moment(date, ["YYYY-MM-DD", "DD/MM/YYYY"], true);
+
         if (!selectedDate.isValid()) {
             return res.status(400).json({
                 success: false,
@@ -1805,7 +1801,83 @@ exports.getAvailableTable = async (req, res) => {
 
         const slotTime = moment(time, "hh:mm A").format("HH:mm");
 
-        /* ================= FETCH TABLES WITH ROOM ================= */
+        /* ================= SHIFT VALIDATION ================= */
+
+        const shortDay = selectedDate.format("ddd");
+
+        const map = {
+            Mon: "Mo",
+            Tue: "Tu",
+            Wed: "We",
+            Thu: "Th",
+            Fri: "Fr",
+            Sat: "Sa",
+            Sun: "Su"
+        };
+
+        const weekdayName = map[shortDay];
+
+        const shifts = await Shift.find({
+            restaurantId,
+            isActive: true
+        });
+
+        if (!shifts.length) {
+            return res.status(200).json({
+                success: true,
+                message: "No shifts available",
+                data: []
+            });
+        }
+
+        const convertToMinutes = (t) => {
+            const [h, m] = t.split(":").map(Number);
+            return h * 60 + m;
+        };
+
+        const slotMinutes = convertToMinutes(slotTime);
+
+        let validShift = shifts.find(shift => {
+
+            const isRecurringValid =
+                shift.type === "Recurring" &&
+                (!shift.daysActive?.length || shift.daysActive.includes(weekdayName)) &&
+                (!shift.startDate || !selectedDate.isBefore(moment(shift.startDate), "day")) &&
+                (shift.isIndefinite ||
+                    !shift.endDate ||
+                    !selectedDate.isAfter(moment(shift.endDate), "day"));
+
+            const isSpecialValid =
+                shift.type === "Special" &&
+                shift.startDate &&
+                !selectedDate.isBefore(moment(shift.startDate), "day") &&
+                (!shift.endDate ||
+                    !selectedDate.isAfter(moment(shift.endDate), "day"));
+
+            if (!isRecurringValid && !isSpecialValid) return false;
+
+            let start = convertToMinutes(shift.startTime);
+            let end = convertToMinutes(shift.endTime);
+
+            /* OVERNIGHT FIX */
+            if (end <= start) end += 1440;
+
+            let checkTime = slotMinutes;
+
+            if (checkTime < start) checkTime += 1440;
+
+            return checkTime >= start && checkTime < end;
+        });
+
+        if (!validShift) {
+            return res.status(400).json({
+                success: false,
+                message: "Selected slot is not valid for any shift"
+            });
+        }
+
+        /* ================= FETCH TABLES ================= */
+
         const tables = await Table.find({
             restaurantId,
             status: "Available",
@@ -1817,15 +1889,15 @@ exports.getAvailableTable = async (req, res) => {
         if (!tables.length) {
             return res.status(200).json({
                 success: true,
+                message: "No tables found",
                 totalTables: 0,
                 totalRooms: 0,
                 data: []
             });
         }
 
-        const tableIds = tables.map(t => t._id);
-
         /* ================= BLOCK CHECK ================= */
+
         const blocks = await Block.find({
             restaurantId,
             status: "Active",
@@ -1838,25 +1910,43 @@ exports.getAvailableTable = async (req, res) => {
 
         for (const block of blocks) {
 
+            /* FULL RESTAURANT BLOCK */
             if (block.isFullRestaurantBlock) {
-                return res.status(200).json({
-                    success: true,
-                    totalTables: 0,
-                    totalRooms: 0,
-                    data: []
-                });
-            }
-
-            if (block.tableIds?.length) {
 
                 if (block.startTime && block.endTime) {
                     if (slotTime >= block.startTime && slotTime < block.endTime) {
-                        block.tableIds.forEach(id =>
+                        return res.status(200).json({
+                            success: true,
+                            message: "Restaurant blocked for this time",
+                            totalTables: 0,
+                            totalRooms: 0,
+                            data: []
+                        });
+                    }
+                } else {
+                    return res.status(200).json({
+                        success: true,
+                        message: "Restaurant fully blocked",
+                        totalTables: 0,
+                        totalRooms: 0,
+                        data: []
+                    });
+                }
+            }
+
+            /* 🔥 TABLE BLOCK */
+            if (block.tableIds?.length) {
+
+                const validIds = block.tableIds.filter(id => id);
+
+                if (block.startTime && block.endTime) {
+                    if (slotTime >= block.startTime && slotTime < block.endTime) {
+                        validIds.forEach(id =>
                             blockedTableIds.add(id.toString())
                         );
                     }
                 } else {
-                    block.tableIds.forEach(id =>
+                    validIds.forEach(id =>
                         blockedTableIds.add(id.toString())
                     );
                 }
@@ -1864,18 +1954,22 @@ exports.getAvailableTable = async (req, res) => {
         }
 
         /* ================= RESERVATION CHECK ================= */
+
         const reservations = await Reservation.find({
             restaurantId,
             date: {
                 $gte: selectedDate.startOf("day").toDate(),
                 $lte: selectedDate.endOf("day").toDate()
             },
-            status: { $in: ["Pending", "Confirmed"] }
+            status: { $in: ["Pending", "Confirmed", "Seated"] }
         }).select("tableId time");
 
         let reservedTableIds = new Set();
 
         for (const r of reservations) {
+
+            if (!r.tableId) continue; // 🔥 FIX
+
             const resTime = moment(r.time, "HH:mm").format("HH:mm");
 
             if (resTime === slotTime) {
@@ -1883,24 +1977,26 @@ exports.getAvailableTable = async (req, res) => {
             }
         }
 
-        /* ================= FILTER AVAILABLE ================= */
+        /* ================= FINAL FILTER ================= */
+
         const availableTables = tables.filter(t =>
+            t?._id &&
             !blockedTableIds.has(t._id.toString()) &&
             !reservedTableIds.has(t._id.toString())
         );
 
         /* ================= GROUP BY ROOM ================= */
+
         const roomMap = new Map();
 
         for (const table of availableTables) {
 
             const roomId = table.roomId?._id?.toString() || "no-room";
-            const roomName = table.roomId?.name || "No Room";
 
             if (!roomMap.has(roomId)) {
                 roomMap.set(roomId, {
                     roomId,
-                    roomName,
+                    roomName: table.roomId?.name || "No Room",
                     tables: []
                 });
             }
@@ -1914,8 +2010,11 @@ exports.getAvailableTable = async (req, res) => {
 
         const groupedData = Array.from(roomMap.values());
 
+        /* ================= RESPONSE ================= */
+
         return res.status(200).json({
             success: true,
+            message: "Available tables fetched successfully",
             totalTables: availableTables.length,
             totalRooms: groupedData.length,
             data: groupedData
@@ -1923,6 +2022,7 @@ exports.getAvailableTable = async (req, res) => {
 
     } catch (error) {
         console.error("Error fetching available tables:", error);
+
         return res.status(500).json({
             success: false,
             message: "Error fetching available tables",

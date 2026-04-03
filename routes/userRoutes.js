@@ -21,6 +21,9 @@ const {
     addStaff,
     getUserRoleCounts,
     createSuperAdmin,
+    toggleRolePermission,
+    getPermissionMatrix,
+    toggleUserStatus,
     getSuperAdmins,
     verifyResetLink
 } = require("../controllers/user.controllers.js");
@@ -61,10 +64,13 @@ router.put('/markAllAsRead', verifyToken, notificationController.markAllAsRead);
 router.post('/getManagers', getManagers);
 router.post('/getStaffs', getStaffs);
 router.post('/add-staff', addStaff);
+router.post('/toggleRolePermission', verifyToken, requireRole("super_admin"), toggleRolePermission);
+router.get('/getPermissionMatrix', verifyToken, requireRole("super_admin"), getPermissionMatrix);
 
 router.post('/getUserRoleCounts', getUserRoleCounts);
 router.post('/createSuperAdmin', verifyToken, requireRole("super_admin"), createSuperAdmin);
 router.post('/getSuperAdmins', verifyToken, requireRole("super_admin"), getSuperAdmins);
+router.post('/toggleUserStatus/:id', verifyToken, requireRole("super_admin"), toggleUserStatus);
 
 router.post('/updateUsersById', upload.single('profile'),
     updateProfileValidator, validate, updateUsersById);

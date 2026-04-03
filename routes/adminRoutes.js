@@ -32,6 +32,7 @@ router.put('/updateRestaurantStatus/:id', restController.updateRestaurantStatus)
 
 router.post('/createGuest', createGuestValidator, validate, guestController.createGuest);
 router.post('/getGuests', guestController.getGuests);
+router.post('/getGuestDetails', guestController.getGuestDetails);
 router.post('/getGuestById/:id', guestController.getGuestById);
 router.post('/updateGuest/:id', updateGuestValidator, validate, guestController.updateGuest);
 router.post('/deleteGuest/:id', guestController.deleteGuest);

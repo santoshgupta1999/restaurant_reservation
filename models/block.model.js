@@ -86,6 +86,12 @@ const blockSchema = new mongoose.Schema(
 
         endTime: { type: String },
 
+        channel: {
+            type: String,
+            enum: ["online_foh", "online_only", "foh_only"],
+            default: "online_foh"
+        },
+
     },
     { timestamps: true }
 );

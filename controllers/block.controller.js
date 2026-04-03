@@ -253,13 +253,23 @@ exports.createBlock = async (req, res) => {
             daysActive,
             note,
             startTime,
-            endTime
+            endTime,
+            channel,
+            isActive
         } = req.body;
 
         if (!restaurantId || !reason) {
             return res.status(400).json({
                 success: false,
                 message: "restaurantId and reason are required."
+            });
+        }
+
+        const allowedChannels = ["online_foh", "online_only", "foh_only"];
+        if (!channel || !allowedChannels.includes(channel)) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid channel is required"
             });
         }
 
@@ -397,7 +407,9 @@ exports.createBlock = async (req, res) => {
             daysActive: daysActive || [],
             note,
             startTime: normalizedStartTime,
-            endTime: normalizedEndTime
+            endTime: normalizedEndTime,
+            channel,
+            isActive
         };
 
         const block = blockId

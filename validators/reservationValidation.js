@@ -38,8 +38,7 @@ exports.reservationValidator = [
         }),
 
     body("date")
-        .notEmpty().withMessage("Reservation date is required.")
-        .isISO8601().toDate().withMessage("Invalid date format."),
+        .notEmpty().withMessage("Reservation date is required."),
 
     body("time")
         .notEmpty().withMessage("Time is required.")

@@ -2,6 +2,13 @@ const mongoose = require("mongoose");
 
 const SeatingPreferenceSchema = new mongoose.Schema(
     {
+
+        restaurantId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Restaurant",
+            required: true
+        },
+
         preferenceName: {
             type: String,
             required: true,
@@ -62,6 +69,14 @@ const SeatingPreferenceSchema = new mongoose.Schema(
     },
     {
         timestamps: true
+    }
+);
+
+SeatingPreferenceSchema.index(
+    { restaurantId: 1, preferenceName: 1 },
+    {
+        unique: true,
+        collation: { locale: "en", strength: 2 }
     }
 );
 

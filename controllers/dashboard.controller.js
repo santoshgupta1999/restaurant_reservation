@@ -94,6 +94,7 @@ exports.getVenues = async (req, res) => {
 
         return res.status(200).json({
             success: true,
+            message: "Venues fetched successfully",
             data: {
 
                 totalVenues: {
@@ -353,6 +354,7 @@ exports.mostActiveVenues = async (req, res) => {
 
         return res.status(200).json({
             success: true,
+            message: "Most active venue fetched successfully.",
             data
         });
 
@@ -458,7 +460,7 @@ exports.getRishAndStatus = async (req, res) => {
                     noShow: {
                         $sum: {
                             $cond: [
-                                { $in: ["$status", ["No-show", "No Show", "noshow"]] },
+                                { $in: ["$status", ["No-Show", "No Show", "noshow"]] },
                                 1,
                                 0
                             ]

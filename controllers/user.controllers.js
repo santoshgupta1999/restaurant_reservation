@@ -9,8 +9,101 @@ const fs = require('fs');
 const mongoose = require('mongoose');
 const BlacklistToken = require("../models/blacklistToken.model");
 const crypto = require("crypto");
-const moment = require("moment-timezone");
 const { formatDateTime } = require("../utils/dateFormatter");
+const RolePermission = require("../models/rolePermission.model.js");
+const FEATURES = require("../configs/features.js");
+
+
+exports.toggleRolePermission = async (req, res) => {
+    try {
+        const { role, permission } = req.body;
+
+        if (!role || !permission) {
+            return res.status(400).json({
+                success: false,
+                message: "role and permission are required"
+            });
+        }
+
+        if (!FEATURES.includes(permission)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid permission key"
+            });
+        }
+
+        let roleData = await RolePermission.findOne({ role });
+
+        if (!roleData) {
+            roleData = new RolePermission({
+                role,
+                permissions: [permission]
+            });
+        } else {
+            let permissions = roleData.permissions;
+
+            if (permissions.includes(permission)) {
+                // REMOVE
+                permissions = permissions.filter(p => p !== permission);
+            } else {
+                // ADD
+                permissions.push(permission);
+            }
+
+            roleData.permissions = permissions;
+        }
+
+        await roleData.save();
+
+        return res.json({
+            success: true,
+            role: roleData.role,
+            permissions: roleData.permissions
+        });
+
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
+    }
+};
+
+exports.getPermissionMatrix = async (req, res) => {
+    try {
+        // Get all roles data
+        const rolesData = await RolePermission.find({});
+
+        // Convert to map for easy access
+        const roleMap = {};
+        rolesData.forEach(r => {
+            roleMap[r.role] = r.permissions;
+        });
+
+        const roles = ["Manager", "Call Center", "Host", "Admin"];
+
+        const matrix = FEATURES.map(feature => {
+            const row = { feature };
+
+            roles.forEach(role => {
+                row[role] = roleMap[role]?.includes(feature) || false;
+            });
+
+            return row;
+        });
+
+        return res.json({
+            success: true,
+            data: matrix
+        });
+
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
+    }
+};
 
 
 exports.register = async (req, res) => {
@@ -113,6 +206,10 @@ exports.login = async (req, res) => {
         user.lastLogin = new Date();
         await user.save();
 
+        const roleData = await RolePermission.findOne({ role: user.role });
+
+        const permissions = roleData?.permissions || [];
+
         const token = jwt.sign(
             {
                 id: user._id,
@@ -133,6 +230,7 @@ exports.login = async (req, res) => {
                 email: user.email,
                 role: user.role,
                 restaurantId: user.restaurantId,
+                permissions,
             },
         });
 
@@ -166,6 +264,13 @@ exports.superAdminLogin = async (req, res) => {
             });
         }
 
+        if (!user.isActive) {
+            return res.status(403).json({
+                success: false,
+                message: `Your account is inActive, can't login.`,
+            });
+        }
+
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             return res.status(401).json({
@@ -173,6 +278,9 @@ exports.superAdminLogin = async (req, res) => {
                 message: "Invalid password.",
             });
         }
+
+        user.lastLogin = new Date();
+        await user.save();
 
         const token = jwt.sign(
             {
@@ -317,74 +425,6 @@ exports.updateProfile = async (req, res) => {
     }
 };
 
-// exports.changePassword = async (req, res) => {
-//     try {
-//         const { oldPassword, newPassword, confirmPassword } = req.body;
-
-//         if (!oldPassword || !newPassword || !confirmPassword) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: 'All fields are required'
-//             });
-//         }
-
-//         if (newPassword.length < 6) {
-//             return res.status(400).json({
-//                 success: true,
-//                 message: 'New password at least 6 characters long'
-//             });
-//         }
-
-//         if (oldPassword === newPassword) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "New Password must be different from Old Password"
-//             });
-//         }
-
-//         if (newPassword !== confirmPassword) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "New password and confirm password do not match"
-//             });
-//         }
-
-//         const user = await User.findById(req.user._id);
-//         if (!user) {
-//             return res.status(404).json({
-//                 success: false,
-//                 message: 'User not found'
-//             });
-//         }
-
-//         const isMatch = await bcrypt.compare(oldPassword, user.password);
-//         if (!isMatch) {
-//             return res.status(401).json({
-//                 success: false,
-//                 message: "Old password is incorrect"
-//             });
-//         }
-
-//         const salt = await bcrypt.genSalt(10);
-//         const hashedPassword = await bcrypt.hash(newPassword, salt);
-
-//         user.password = hashedPassword;
-//         await user.save();
-
-//         return res.status(200).json({
-//             success: true,
-//             message: "Password updated successfully"
-//         });
-
-//     } catch (error) {
-//         console.error("Error while changing Password", error);
-//         res.status(500).json({
-//             success: false,
-//             message: "Error while changing password"
-//         });
-//     }
-// };
-
 exports.changePassword = async (req, res) => {
     try {
         const { oldPassword, newPassword, confirmPassword } = req.body;
@@ -396,10 +436,18 @@ exports.changePassword = async (req, res) => {
             });
         }
 
-        if (newPassword.length < 6) {
+        if (newPassword.length < 8) {
             return res.status(400).json({
                 success: true,
-                message: 'New password at least 6 characters long'
+                message: 'New password at least 8 characters long'
+            });
+        }
+
+        const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+        if (!PASSWORD_REGEX.test(newPassword)) {
+            return res.status(400).json({
+                success: false,
+                message: "Strong password is required."
             });
         }
 
@@ -930,7 +978,7 @@ exports.getStaffs = async (req, res) => {
             const obj = user.toObject();
 
             obj.lastLogin = obj.lastLogin
-                ? moment(obj.lastLogin).format("DD MMM YYYY, hh:mm A")
+                ? formatDateTime(obj.lastLogin)
                 : null;
 
             return obj;
@@ -1025,6 +1073,60 @@ exports.updateUsersById = async (req, res) => {
     }
 };
 
+const sendStaffMail = async (email, password) => {
+    const subject = "Welcome to Reservation Restaurant";
+
+    const text = `
+Welcome!
+
+A very special welcome to you, thank you for joining us
+
+Your User Email is ${email}
+Your Password is ${password}
+
+Please keep your password secret and safe.
+Your credentials are confidential, Please do not share it with anyone.
+
+We hope you enjoy your stay at Reservation Restaurant.
+
+If you have any questions, just reply to ${process.env.SMTP_USER}. We're always happy to help.
+
+Best regards,
+Reservation Restaurant Team
+`;
+
+    const html = `
+<div style="font-family: Arial, sans-serif; line-height: 1.6;">
+    <h2>Welcome!</h2>
+
+    <p>A very special welcome to you, Thank You for joining us.</p>
+
+    <p><b>Your Login Details:</b></p>
+    <ul>
+        <li><b>Email:</b> ${email}</li>
+        <li><b>Password:</b> ${password}</li>
+    </ul>
+
+    <p style="color:red;">
+        Please keep your password secret and safe, Do not share your credentials with anyone.
+    </p>
+
+    <p>
+        We hope you enjoy your stay at <b>Reservation Restaurant</b>. If you have any questions, just reply to <b>${process.env.SMTP_USER}</b>.
+    </p>
+
+    <br/>
+    <b>Best regards,<br/>Reservation Restaurant Team</b>
+</div>
+`;
+
+    try {
+        await sendMail(email, subject, text, html);
+    } catch (err) {
+        console.error("Mail error:", err);
+    }
+};
+
 exports.addStaff = async (req, res) => {
     try {
         const { id, email, password, role, restaurantId, isActive } = req.body;
@@ -1059,7 +1161,7 @@ exports.addStaff = async (req, res) => {
             if (!allowedRoles.includes(role)) {
                 return res.status(400).json({
                     success: false,
-                    message: "Role must be either Host , Manager or Call Center"
+                    message: "Invalid role"
                 });
             }
 
@@ -1078,6 +1180,28 @@ exports.addStaff = async (req, res) => {
                 });
             }
 
+            const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+
+            /* ================= EMAIL VALIDATION ================= */
+
+            if (!EMAIL_REGEX.test(email)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid email format"
+                });
+            }
+
+            /* ================= PASSWORD VALIDATION ================= */
+
+            if (!PASSWORD_REGEX.test(password)) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Strong password is required."
+                });
+            }
+
             const emailExists = await User.findOne({
                 email: normalizedEmail,
                 _id: { $ne: id }
@@ -1086,29 +1210,34 @@ exports.addStaff = async (req, res) => {
             if (emailExists) {
                 return res.status(400).json({
                     success: false,
-                    message: "Staff with this email already exists"
+                    message: "Email already exists"
                 });
             }
 
-            // Prepare update object
-            const updateData = {
-                email: normalizedEmail,
-                role,
-                restaurantId,
-                isActive
-            };
+            let hashedPassword = existingStaff.password;
+            let isPasswordChanged = false;
 
-            // Only update password if provided
             if (password && password.trim() !== "") {
-                const hashedPassword = await bcrypt.hash(password, 10);
-                updateData.password = hashedPassword;
+                hashedPassword = await bcrypt.hash(password, 10);
+                isPasswordChanged = true;
             }
 
             const updatedStaff = await User.findByIdAndUpdate(
                 id,
-                updateData,
+                {
+                    email: normalizedEmail,
+                    role,
+                    restaurantId,
+                    isActive,
+                    password: hashedPassword
+                },
                 { new: true, runValidators: true }
             );
+
+            /* SEND EMAIL ONLY IF PASSWORD UPDATED */
+            if (isPasswordChanged) {
+                await sendStaffMail(normalizedEmail, password);
+            }
 
             const response = updatedStaff.toObject();
             delete response.password;
@@ -1129,7 +1258,7 @@ exports.addStaff = async (req, res) => {
         if (!allowedRoles.includes(role)) {
             return res.status(400).json({
                 success: false,
-                message: "Role must be either Host or Manager"
+                message: "Invalid role"
             });
         }
 
@@ -1144,7 +1273,7 @@ exports.addStaff = async (req, res) => {
         if (existingUser) {
             return res.status(400).json({
                 success: false,
-                message: "Staff with this email already exists"
+                message: "Email already exists"
             });
         }
 
@@ -1157,6 +1286,9 @@ exports.addStaff = async (req, res) => {
             restaurantId,
             isActive
         });
+
+        /* SEND EMAIL ON CREATE */
+        await sendStaffMail(normalizedEmail, password);
 
         const staffResponse = newStaff.toObject();
         delete staffResponse.password;
@@ -1224,10 +1356,14 @@ exports.getUserRoleCounts = async (req, res) => {
     }
 };
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+
 exports.createSuperAdmin = async (req, res) => {
     try {
         const { name, email, password, isActive = true } = req.body;
 
+        /* ================= BASIC VALIDATION ================= */
 
         if (!name || !email || !password) {
             return res.status(400).json({
@@ -1236,10 +1372,22 @@ exports.createSuperAdmin = async (req, res) => {
             });
         }
 
-        if (password.length < 6) {
+        /* ================= EMAIL VALIDATION ================= */
+
+        if (!EMAIL_REGEX.test(email)) {
             return res.status(400).json({
                 success: false,
-                message: "Password must be at least 6 characters"
+                message: "Invalid email format"
+            });
+        }
+
+        /* ================= PASSWORD VALIDATION ================= */
+
+        if (!PASSWORD_REGEX.test(password)) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Strong password is required."
             });
         }
 
@@ -1254,17 +1402,78 @@ exports.createSuperAdmin = async (req, res) => {
             });
         }
 
+        /* ================= HASH PASSWORD ================= */
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
+        /* ================= CREATE USER ================= */
 
         const user = await User.create({
-            name,
-            email,
+            name: name.trim(),
+            email: email.toLowerCase().trim(),
             password: hashedPassword,
             role: "super_admin",
             isActive
         });
+
+        /* ================= EMAIL CONTENT ================= */
+
+        const subject = "Welcome to Reservation Restaurant";
+
+        const text = `
+Welcome ${name}!
+
+A very special welcome to you, thank you for joining us
+
+Your User Email is ${email}
+Your Password is ${password}
+
+Please keep your password secret and safe.
+Your credentials are confidential, Please do not share it with anyone.
+
+We hope you enjoy your stay at Reservation Restaurant.
+
+If you have any questions, just reply to ${process.env.SMTP_USER}. We're always happy to help.
+
+Best regards,
+Reservation Restaurant Team
+`;
+
+        const html = `
+<div style="font-family: Arial, sans-serif; line-height: 1.6;">
+    <h2>Welcome ${name}! </h2>
+
+    <p>A very special welcome to you, Thank You for joining us.</p>
+
+    <p><b>Your Login Details:</b></p>
+    <ul>
+        <li><b>URL:</b> https://itdevelopmentservices.com/restaurants/</li>
+        <li><b>Email:</b> ${email}</li>
+        <li><b>Password:</b> ${password}</li>
+    </ul>
+
+    <p style="color:red;">
+        Please keep your password secret and safe, Do not share your credentials with anyone.
+    </p>
+
+    <p>
+        We hope you enjoy your stay at <b>Reservation Restaurant</b>. If you have any questions, just reply to <b>${process.env.SMTP_USER}</b>.
+    </p>
+
+    <br/>
+    <b>Best regards,<br/>Reservation Restaurant Team</b>
+</div>
+`;
+
+        /* ================= SEND EMAIL ================= */
+
+        try {
+            await sendMail(email, subject, text, html);
+        } catch (mailError) {
+            console.error("Email send failed:", mailError);
+        }
+
+        /* ================= RESPONSE ================= */
 
         return res.status(201).json({
             success: true,
@@ -1280,6 +1489,7 @@ exports.createSuperAdmin = async (req, res) => {
 
     } catch (error) {
         console.error("Create super admin error:", error);
+
         return res.status(500).json({
             success: false,
             message: "Error creating super admin",
@@ -1324,7 +1534,7 @@ exports.getSuperAdmins = async (req, res) => {
             role: "Super Admin",
             status: u.isActive ? "Active" : "Inactive",
             lastLogin: u.lastLogin
-                ? moment(u.lastLogin).format("DD MMM YYYY, hh:mm A")
+                ? formatDateTime(u.lastLogin)
                 : null
         }));
 
@@ -1341,6 +1551,40 @@ exports.getSuperAdmins = async (req, res) => {
             success: false,
             message: "Error fetching super admin list",
             error: error.message
+        });
+    }
+};
+
+exports.toggleUserStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Find user first
+        const user = await User.findById(id);
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found.",
+            });
+        }
+
+        // Toggle value
+        user.isActive = !user.isActive;
+
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: `Account ${user.isActive ? "activated" : "deactivated"} successfully.`,
+        });
+
+    } catch (error) {
+        console.error("Error toggling user status:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error toggling user status.",
+            error: error.message,
         });
     }
 };

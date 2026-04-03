@@ -640,7 +640,7 @@ exports.getRemiUsersList = async (req, res) => {
                             $filter: {
                                 input: "$reservations",
                                 as: "r",
-                                cond: { $eq: ["$$r.status", "No-show"] }
+                                cond: { $eq: ["$$r.status", "No-Show"] }
                             }
                         }
                     }
@@ -658,6 +658,7 @@ exports.getRemiUsersList = async (req, res) => {
                     email: 1,
                     secondaryEmail: 1,
                     phone: 1,
+                    countryCode: 1,
                     secondaryPhone: 1,
                     address: 1,
                     gender: 1,
@@ -717,6 +718,7 @@ exports.getRemiUsersList = async (req, res) => {
 
         return res.status(200).json({
             success: true,
+            message: "Remi users fetched successfully",
             total,
             data
         });
@@ -858,7 +860,7 @@ exports.getCrossVenue = async (req, res) => {
                     lastVisit: { $max: "$date" },
                     noShows: {
                         $sum: {
-                            $cond: [{ $eq: ["$status", "No-show"] }, 1, 0]
+                            $cond: [{ $eq: ["$status", "No-Show"] }, 1, 0]
                         }
                     }
                 }
@@ -899,6 +901,7 @@ exports.getCrossVenue = async (req, res) => {
 
         return res.status(200).json({
             success: true,
+            message: "Cross venue fetched successfully",
             count: data.length,
             data
         });
@@ -946,6 +949,7 @@ exports.getGlobalVisit = async (req, res) => {
 
         return res.status(200).json({
             success: true,
+            message: "Global visits fetched successfully",
             count: formattedData.length,
             data: formattedData
         });
@@ -978,7 +982,7 @@ exports.getRemiUserDashboard = async (req, res) => {
 
         const noShow = await Reservation.countDocuments({
             guestId: id,
-            status: "No-show"
+            status: "No-Show"
         });
 
         const venues = await Reservation.distinct("restaurantId", {
@@ -1014,5 +1018,94 @@ exports.getRemiUserDashboard = async (req, res) => {
 
     } catch (err) {
         res.status(500).json({ message: err.message });
+    }
+};
+
+exports.getGuestDetails = async (req, res) => {
+    try {
+        const { phone, restaurantId, countryCode } = req.body;
+
+        /* ================= VALIDATION ================= */
+
+        if (!phone || !restaurantId) {
+            return res.status(400).json({
+                success: false,
+                message: "phone and restaurantId are required"
+            });
+        }
+
+        if (!countryCode) {
+            return res.status(400).json({
+                success: false,
+                message: "countryCode is required"
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid restaurantId"
+            });
+        }
+
+        const normalizedPhone = phone.trim();
+        const normalizedCode = countryCode ? countryCode.trim() : undefined;
+
+        /* ================= QUERY ================= */
+
+        const query = {
+            restaurantId,
+            phone: normalizedPhone
+        };
+
+        // Optional: countryCode bhi match karo agar bheja ho
+        if (normalizedCode) {
+            query.countryCode = normalizedCode;
+        }
+
+        const guest = await Guest.findOne(query)
+            .select("-__v")
+            .lean();
+
+        if (!guest) {
+            return res.status(404).json({
+                success: false,
+                message: "Guest not found"
+            });
+        }
+
+        /* ================= RESPONSE ================= */
+
+        return res.status(200).json({
+            success: true,
+            message: "Guest details fetched successfully",
+            data: {
+                id: guest._id,
+                remiId: guest.remiId,
+                firstName: guest.firstName,
+                lastName: guest.lastName,
+                email: guest.email,
+                phone: guest.phone,
+                countryCode: guest.countryCode,
+                gender: guest.gender,
+                dob: formatDate(guest.dob),
+                anniversary: guest.anniversary,
+                totalVisits: guest.totalVisits,
+                lastVisitAt: formatDate(guest.lastVisitAt),
+                upcomingVisitAt: formatDate(guest.upcomingVisitAt),
+                tags: guest.tags,
+                notes: guest.notes,
+                isActive: guest.isActive
+            }
+        });
+
+    } catch (error) {
+        console.error("getGuestDetails error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching guest details",
+            error: error.message
+        });
     }
 };

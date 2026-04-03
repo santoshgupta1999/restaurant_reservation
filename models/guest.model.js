@@ -27,7 +27,22 @@ const guestSchema = new mongoose.Schema(
         },
         firstName: { type: String, set: capitalize },
         lastName: { type: String, set: capitalize },
-        gender: { type: String, enum: ["Male", "Female", "Other", "Prefer not to say", "N/A"], default: "N/A" },
+        gender: {
+            type: String,
+            enum: ["Male", "Female", "Other", "Prefer not to say", "N/A"],
+            default: "N/A",
+            set: (value) => {
+                if (!value) return "N/A";
+
+                const map = {
+                    male: "Male",
+                    female: "Female",
+                    other: "Other"
+                };
+
+                return map[value.toLowerCase()] || value;
+            }
+        },
         dob: { type: Date },
         anniversary: { type: Date },
         secondaryEmail: { type: String },

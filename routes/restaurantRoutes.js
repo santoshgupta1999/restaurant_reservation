@@ -79,6 +79,8 @@ router.post("/shift-names/:restaurantId", restaurantController.getShiftNamesByRe
 
 // -------------------------------- Preference -------------------------
 
+router.post("/getSeatingPrefrencesName", seatingPreference.getSeatingPrefrencesName);
+router.post("/getwidgetSeatingPrefrencesName/:restaurantId", seatingPreference.getwidgetSeatingPrefrencesName);
 router.post("/addPreference", seatingPreference.addSeatingPreference);
 router.delete("/deletePreference", seatingPreference.deleteSeatingPreference);
 router.post("/togglePreferenceStatus", seatingPreference.toggleSeatingPreferenceStatus);
