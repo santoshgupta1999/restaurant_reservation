@@ -94,10 +94,10 @@ exports.shiftValidator = [
         .withMessage("sameDurationForAll must be true or false.")
         .toBoolean(),
 
-    body("duration")
-        .optional()
-        .isInt({ min: 1 })
-        .withMessage("duration must be a positive number (minutes)."),
+    // body("duration")
+    //     .optional()
+    //     .isInt({ min: 1 })
+    //     .withMessage("duration must be a positive number (minutes)."),
 
     body("durationByPartySize")
         .optional()

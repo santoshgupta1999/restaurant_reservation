@@ -65,10 +65,10 @@ exports.blockValidator = [
         .isArray()
         .withMessage("daysActive must be an array"),
 
-    body("note")
-        .optional()
-        .isString()
-        .withMessage("note must be a string"),
+    // body("note")
+    //     .optional()
+    //     .isString()
+    //     .withMessage("note must be a string"),
 
     /* ================= CUSTOM LOGIC ================= */
 
@@ -149,8 +149,8 @@ exports.updateBlockValidator = [
         .isArray()
         .withMessage("daysActive must be an array"),
 
-    body("note")
-        .optional()
-        .isString()
-        .withMessage("note must be a string")
+    // body("note")
+    //     .optional()
+    //     .isString()
+    //     .withMessage("note must be a string")
 ];

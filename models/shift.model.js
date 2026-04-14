@@ -42,6 +42,7 @@ const shiftSchema = new mongoose.Schema(
             paymentType: { type: String, enum: ["hold", "deposit", null], default: null },
             noFeeCancellationWindow: { type: Number },
         },
+        policyStatus: { type: Boolean, default: true },
         policyNote: { type: String },
         isActive: { type: Boolean, default: true },
         isExpired: { type: Boolean, default: false },

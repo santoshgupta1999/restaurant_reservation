@@ -64,6 +64,8 @@ const blockSchema = new mongoose.Schema(
             }
         ],
 
+        policyStatus: { type: Boolean, default: true },
+
         note: {
             type: String,
             default: null

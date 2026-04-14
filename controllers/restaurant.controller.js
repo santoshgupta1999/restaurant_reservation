@@ -905,7 +905,7 @@ exports.getAllShift = async (req, res) => {
         }
 
         const shiftsRaw = await Shift.find(query)
-            .populate("restaurantId", "name email phone address")
+            .populate("restaurantId", "venueName email countryCode phone city")
             .sort({ isActive: -1, startTime: 1 });
 
         const formatShiftDates = (shift) => {
@@ -928,15 +928,15 @@ exports.getAllShift = async (req, res) => {
             }
 
             if (obj.startTime) {
-                obj.startTime = formatTime(obj.startTime);
+                obj.startTime = convertTo12Hour(obj.startTime);
             }
 
             if (obj.endTime) {
-                obj.endTime = formatTime(obj.endTime);
+                obj.endTime = convertTo12Hour(obj.endTime);
             }
 
             if (obj.lastBookableTime) {
-                obj.lastBookableTime = formatTime(obj.lastBookableTime);
+                obj.lastBookableTime = convertTo12Hour(obj.lastBookableTime);
             }
 
             return obj;
