@@ -68,7 +68,6 @@ exports.createRestaurant = async (req, res) => {
             country,
             city,
             managerEmail,
-            tier,
             status,
             trialEndDate,
 
@@ -88,6 +87,7 @@ exports.createRestaurant = async (req, res) => {
             x
         } = req.body;
 
+        // Parse JSON fields
         if (typeof openingHours === "string") {
             openingHours = JSON.parse(openingHours);
         }
@@ -99,44 +99,19 @@ exports.createRestaurant = async (req, res) => {
         }
 
         // REQUIRED
-        if (!venueName || !country || !city || !managerEmail || !tier || !status) {
+        if (!venueName || !country || !city || !managerEmail || !status) {
             return res.status(400).json({
                 message: "Required fields missing"
             });
         }
 
-        // Validate tier ID
-        if (!mongoose.Types.ObjectId.isValid(tier)) {
-            return res.status(400).json({ message: "Invalid tier ID" });
-        }
-
-        const tierExists = await Tier.findOne({
-            _id: tier,
-            status: "Active"
-        });
-        if (!tierExists) {
-            return res.status(400).json({ message: "No Active Tier not found" });
-        }
-
+        // Email validation
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(managerEmail)) {
             return res.status(400).json({ message: "Invalid manager email" });
         }
 
-        // agar Trial hai aur date nahi di
-        if (status === "Trial" && !trialEndDate) {
-            return res.status(400).json({
-                message: "Trial end date required for trial plan"
-            });
-        }
-
-        // agar Trial nahi hai aur date di hui hai
-        if (status !== "Trial" && trialEndDate) {
-            return res.status(400).json({
-                message: "Trial end date only allowed when status is Trial"
-            });
-        }
-
+        // Duplicate email check
         const existingRestaurant = await Restaurant.findOne({ managerEmail });
         if (existingRestaurant) {
             return res.status(400).json({
@@ -144,26 +119,35 @@ exports.createRestaurant = async (req, res) => {
             });
         }
 
-        // STATUS & trialEndDate
+        // STATUS validation
         status = status.trim();
         const allowedStatus = ["Trial", "Active", "Suspended", "Locked"];
         if (!allowedStatus.includes(status)) {
             return res.status(400).json({ message: "Invalid status" });
         }
+
+        // Trial logic
         if (status === "Trial") {
-            if (!trialEndDate) return res.status(400).json({ message: "Trial end date required" });
-            if (new Date(trialEndDate) <= new Date()) return res.status(400).json({ message: "Trial end date must be future date" });
+            if (!trialEndDate) {
+                return res.status(400).json({ message: "Trial end date required" });
+            }
+            if (new Date(trialEndDate) <= new Date()) {
+                return res.status(400).json({ message: "Trial end date must be future date" });
+            }
         } else if (trialEndDate) {
-            return res.status(400).json({ message: "Trial end date only allowed when status is Trial" });
+            return res.status(400).json({
+                message: "Trial end date only allowed when status is Trial"
+            });
         }
 
-        // Validate cuisines and vibeTags
+        // Validate cuisines
         if (cuisines) {
             if (!Array.isArray(cuisines) || cuisines.length > 3) {
                 return res.status(400).json({ message: "Max 3 cuisines allowed" });
             }
         }
 
+        // Validate vibeTags
         if (vibeTags) {
             if (!Array.isArray(vibeTags) || vibeTags.length > 3) {
                 return res.status(400).json({ message: "Max 3 vibe tags allowed" });
@@ -176,13 +160,12 @@ exports.createRestaurant = async (req, res) => {
             heroImage = req.files.heroImage[0].filename;
         }
 
-        // CREATE RESTAURANT
+        // CREATE RESTAURANT (tier removed)
         const venue = new Restaurant({
             venueName: venueName.trim(),
             country: country.trim(),
             city: city.trim(),
             managerEmail: managerEmail.toLowerCase(),
-            tier,
             status,
             trialEndDate,
             cuisines,

@@ -105,11 +105,10 @@ const restaurantSchema = new mongoose.Schema(
         //     required: true,
         // },
 
-        tier: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "Tier",
-            required: true
-        },
+        // tier: {
+        //     type: mongoose.Schema.Types.ObjectId,
+        //     ref: "Tier"
+        // },
 
         status: {
             type: String,
