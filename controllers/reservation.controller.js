@@ -9,7 +9,7 @@ const mongoose = require('mongoose');
 // const sendSMS = require('../utils/sendSMS'); // <-- optional SMS helper
 const sendEmail = require('../utils/mailer'); // <-- optional Email helper
 const { sendReservationNotification } = require("../utils/reservationNotification");
-const { formatDate, formatTime } = require('../utils/dateFormatter');
+const { formatDate, formatDateTime, formatTime } = require('../utils/dateFormatter');
 
 // const getDayOfWeek = (dateString) => {
 //     const date = new Date(dateString);
@@ -100,7 +100,7 @@ exports.createReservation = async (req, res) => {
             });
         }
 
-        const allowedSources = ["Online", "Walk-in", "Phone", "Email", "Remi"];
+        const allowedSources = ["Online", "Walk-in", "Phone", "Email-Message", "Remi"];
 
         if (source && !allowedSources.includes(source)) {
             return res.status(400).json({
@@ -176,7 +176,7 @@ exports.createReservation = async (req, res) => {
                 const start = convertToMinutes(s.startTime);
                 const end = convertToMinutes(s.endTime);
 
-                // 🔥 overnight support
+                // overnight support
                 if (end < start) {
                     return reservationMinutes >= start || reservationMinutes < end;
                 }
@@ -185,7 +185,7 @@ exports.createReservation = async (req, res) => {
             });
         }
 
-        /* ❌ REMOVED HARD ERROR
+        /* REMOVED HARD ERROR
         if (!shift) return error
         */
 
@@ -213,7 +213,7 @@ exports.createReservation = async (req, res) => {
                 tableId,
                 date: reservationDate,
                 time,
-                status: { $in: ["Pending", "Confirmed", "Seated"] },
+                status: { $in: ["Pending", "Confirmed", "Upcoming", "Seated"] },
                 _id: { $ne: reservationId }
             });
 
@@ -288,7 +288,7 @@ exports.createReservation = async (req, res) => {
                 isUpdate = true;
             }
 
-            if (["Finished", "No-Show", "Cancelled"].includes(existingReservation.status)) {
+            if (["No-Show", "Cancelled"].includes(existingReservation.status)) {
                 return res.status(400).json({
                     success: false,
                     message: `${existingReservation.status} reservation cannot be modified.`
@@ -300,7 +300,7 @@ exports.createReservation = async (req, res) => {
             }
 
             existingReservation.tableId = tableId || existingReservation.tableId;
-            existingReservation.shiftId = shift?._id || null; // ✅ SAFE
+            existingReservation.shiftId = shift?._id || null;
             existingReservation.date = reservationDate;
             existingReservation.time = formattedTime;
             existingReservation.partySize = partySize;
@@ -318,8 +318,8 @@ exports.createReservation = async (req, res) => {
             reservation = await Reservation.create({
                 restaurantId,
                 guestId: guest._id,
-                tableId: tableId || null, // ✅ table optional
-                shiftId: shift?._id || null, // ✅ shift optional
+                tableId: tableId || null, // table optional
+                shiftId: shift?._id || null, // shift optional
                 date: reservationDate,
                 time: formattedTime,
                 partySize,
@@ -430,7 +430,7 @@ exports.getReservations = async (req, res) => {
 
                 const currentTime = now.toTimeString().slice(0, 5);
 
-                query.status = { $in: ["Pending", "Confirmed"] };
+                query.status = { $in: ["Upcoming"] };
 
                 query.$or = [
                     // Future dates
@@ -516,6 +516,13 @@ exports.getReservations = async (req, res) => {
             obj.date = formatDate(obj.date);
             obj.createdAt = formatDate(obj.createdAt);
             obj.updatedAt = formatDate(obj.updatedAt);
+
+            obj.arrivedAt = formatDateTime(obj.arrivedAt);
+            obj.seatedAt = formatDateTime(obj.seatedAt);
+            obj.finishedAt = formatDateTime(obj.finishedAt);
+            if (obj.cancellation?.at) {
+                obj.cancellation.at = formatDateTime(obj.cancellation.at);
+            }
 
             /* Convert reservation time */
             if (obj.time) {
@@ -751,124 +758,320 @@ exports.updateReservationById = async (req, res) => {
 };
 
 exports.updateReservationStatus = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { status } = req.body;
 
-        const allowedStatuses = ["Pending", "Confirmed", "Seated", "Cancelled", "No-Show", "Finished"];
+    try {
+
+        const { id } = req.params;
+
+        const {
+            status,
+            cancellationReason,
+            cancellationSource
+        } = req.body;
+
+        const allowedStatuses = [
+            "Pending",
+            "Confirmed",
+            "Seated",
+            "Cancelled",
+            "No-Show",
+            "Finished"
+        ];
+
+        const allowedCancellationSources = [
+            "foh",
+            "guest",
+            "block",
+            "shift",
+            "table"
+        ];
 
         if (!id || id.length !== 24) {
+
             return res.status(400).json({
                 success: false,
-                message: 'Invalid reservation ID',
+                message: "Invalid reservation ID",
             });
         }
 
-        if (!status || !allowedStatuses.includes(status)) {
+        if (
+            !status ||
+            !allowedStatuses.includes(status)
+        ) {
+
             return res.status(400).json({
                 success: false,
-                message: `Invalid status. Allowed values are: ${allowedStatuses.join(', ')}`,
+                message:
+                    `Invalid status. Allowed values are: ${allowedStatuses.join(", ")}`
             });
         }
 
-        const updated = await Reservation.findByIdAndUpdate(
-            id,
-            { status },
-            { new: true }
-        ).populate("restaurantId", "venueName heroImage city");
+        // VALIDATE CANCELLATION SOURCE
+        if (
+            cancellationSource &&
+            !allowedCancellationSources.includes(cancellationSource)
+        ) {
 
-        if (!updated) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid cancellation source."
+            });
+        }
+
+        // FETCH RESERVATION
+        const reservation = await Reservation.findById(id);
+
+        if (!reservation) {
+
             return res.status(404).json({
                 success: false,
-                message: 'Reservation not found',
+                message: "Reservation not found",
             });
         }
+
+        /*
+             BLOCK INVALID CANCELLATION
+        */
+        if (
+            status === "Cancelled" &&
+            ["Seated", "No-Show", "Finished"]
+                .includes(reservation.status)
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    `${reservation.status} reservation cannot be cancelled.`
+            });
+        }
+
+        /*
+            CANCEL REASON REQUIRED
+        */
+        if (
+            status === "Cancelled" &&
+            !cancellationReason
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Cancellation reason is required."
+            });
+        }
+
+        /*
+            UPDATE STATUS
+        */
+        reservation.status = status;
+
+        /*
+            CANCELLATION AUDIT
+        */
+        if (status === "Cancelled") {
+
+            reservation.cancellation = {
+                reason: cancellationReason,
+                source: cancellationSource || "foh",
+                actorId: req.user?._id || null,
+                at: new Date()
+            };
+        }
+
+        /*
+            OPTIONAL:
+            CLEAR OLD CANCELLATION
+        */
+        else {
+
+            reservation.cancellation = null;
+        }
+
+        await reservation.save();
+
+        const updated = await Reservation.findById(id)
+            .populate(
+                "restaurantId",
+                "venueName heroImage city"
+            );
 
         return res.status(200).json({
             success: true,
             message: `Reservation ${status} successfully`,
             data: {
                 ...updated.toObject(),
-                restaurant: {
-                    restaurantId: updated.restaurantId._id || null,
-                    name: updated.restaurantId?.venueName || null,
-                    logo: updated.restaurantId?.heroImage || null,
-                    address: updated.restaurantId?.city || null
-                }
             }
         });
 
     } catch (error) {
-        console.error('Error updating reservation status:', error);
+
+        console.error(
+            "Error updating reservation status:",
+            error
+        );
+
         return res.status(500).json({
             success: false,
-            message: 'Internal server error',
+            message: "Internal server error",
             error: error.message,
         });
     }
 };
 
 exports.cancelReservation = async (req, res) => {
+
     try {
+
         const { id } = req.params;
 
+        const { cancellationReason } = req.body;
+
         if (!id || id.length !== 24) {
+
             return res.status(400).json({
                 success: false,
-                message: 'Invalid reservation ID',
+                message: "Invalid reservation ID",
             });
         }
 
-        const reservation = await Reservation.findById(id).populate("guestId");
+        /*
+            CANCEL REASON REQUIRED
+        */
+        if (!cancellationReason) {
+
+            return res.status(400).json({
+                success: false,
+                message: "Cancellation reason is required."
+            });
+        }
+
+        const reservation =
+            await Reservation.findById(id)
+                .populate("guestId");
 
         if (!reservation) {
+
             return res.status(404).json({
                 success: false,
-                message: 'Reservation not found',
+                message: "Reservation not found",
             });
         }
 
-        const restrictedStatuses = ["Cancelled", "Finished", "Seated", "No-Show"];
+        /*
+            TERMINAL STATUS CHECK
+        */
+        const restrictedStatuses = [
+            "Cancelled",
+            "Finished",
+            "Seated",
+            "No-Show"
+        ];
 
-        if (restrictedStatuses.includes(reservation.status)) {
+        if (
+            restrictedStatuses.includes(
+                reservation.status
+            )
+        ) {
+
             return res.status(400).json({
                 success: false,
-                message: `Cannot cancel a reservation that is ${reservation.status}`,
+                message:
+                    `Cannot cancel a reservation that is ${reservation.status}`,
             });
         }
 
+        /*
+            UPDATE STATUS
+        */
         reservation.status = "Cancelled";
-        await reservation.save();
 
-        const guest = {
-            email: reservation.guestId?.email,
-            firstName: reservation.guestId?.firstName,
-            lastName: reservation.guestId?.lastName
+        /*
+            CANCELLATION AUDIT
+        */
+        reservation.cancellation = {
+            reason: cancellationReason,
+
+            source: "guest",
+
+            actorId:
+                req.user?._id || null,
+
+            at: new Date()
         };
 
-        await sendReservationNotification(reservation, guest, "Cancelled");
+        await reservation.save();
 
-        const updated = await reservation.populate("restaurantId", "venueName heroImage city");
+        /*
+            FREE TABLE
+        */
+        if (reservation.tableId) {
+
+            await Table.findByIdAndUpdate(
+                reservation.tableId,
+                {
+                    status: "Available"
+                }
+            );
+        }
+
+        const guest = {
+            email:
+                reservation.guestId?.email,
+
+            firstName:
+                reservation.guestId?.firstName,
+
+            lastName:
+                reservation.guestId?.lastName
+        };
+
+        await sendReservationNotification(
+            reservation,
+            guest,
+            "Cancelled"
+        );
+
+        const updated =
+            await reservation.populate(
+                "restaurantId",
+                "venueName heroImage city"
+            );
 
         return res.status(200).json({
             success: true,
-            message: 'Reservation cancelled successfully',
+            message:
+                "Reservation cancelled successfully",
+
             data: {
                 ...updated.toObject(),
+
                 restaurant: {
-                    restaurantId: updated.restaurantId?._id || null,
-                    name: updated.restaurantId?.venueName || null,
-                    logo: updated.restaurantId?.heroImage || null,
-                    address: updated.restaurantId?.city || null
+
+                    restaurantId:
+                        updated.restaurantId?._id || null,
+
+                    name:
+                        updated.restaurantId?.venueName || null,
+
+                    logo:
+                        updated.restaurantId?.heroImage || null,
+
+                    address:
+                        updated.restaurantId?.city || null
                 }
             }
         });
 
     } catch (error) {
-        console.error('Error cancelling reservation:', error);
+
+        console.error(
+            "Error cancelling reservation:",
+            error
+        );
+
         return res.status(500).json({
             success: false,
-            message: 'Internal server error',
+            message: "Internal server error",
             error: error.message,
         });
     }
@@ -910,8 +1113,9 @@ exports.deleteReservationById = async (req, res) => {
 };
 
 exports.createWidgetReservation = async (req, res) => {
+    const session = await mongoose.startSession();
     try {
-
+        session.startTransaction();
         const { restaurantId } = req.params;
 
         const {
@@ -935,15 +1139,17 @@ exports.createWidgetReservation = async (req, res) => {
         } = req.body;
 
         if (!restaurantId || !date || !time) {
+            await session.abortTransaction();
             return res.status(400).json({
                 success: false,
                 message: "restaurantId, date & time are required."
             });
         }
 
-        const allowedSources = ["Online", "Walk-in", "Phone", "Email", "Remi"];
+        const allowedSources = ["Online", "Walk-in", "Phone", "Email-Message", "Remi"];
 
         if (source && !allowedSources.includes(source)) {
+            await session.abortTransaction();
             return res.status(400).json({
                 success: false,
                 message: "Invalid source type."
@@ -951,6 +1157,7 @@ exports.createWidgetReservation = async (req, res) => {
         }
 
         if (!partySize || partySize <= 0) {
+            await session.abortTransaction();
             return res.status(400).json({
                 success: false,
                 message: "Valid partySize is required."
@@ -962,8 +1169,9 @@ exports.createWidgetReservation = async (req, res) => {
         let existingReservation = null;
 
         if (reservationId) {
-            existingReservation = await Reservation.findById(reservationId);
+            existingReservation = await Reservation.findById(reservationId).session(session);
             if (!existingReservation) {
+                await session.abortTransaction();
                 return res.status(404).json({
                     success: false,
                     message: "Reservation not found."
@@ -1129,6 +1337,7 @@ exports.createWidgetReservation = async (req, res) => {
             }
 
             if (["Finished", "No-show", "Cancelled"].includes(existingReservation.status)) {
+                await session.abortTransaction();
                 return res.status(400).json({
                     success: false,
                     message: `${existingReservation.status} reservation cannot be modified.`
@@ -1160,7 +1369,7 @@ exports.createWidgetReservation = async (req, res) => {
                 existingReservation.shiftId = shift._id;
             }
 
-            reservation = await existingReservation.save();
+            reservation = await existingReservation.save({ session });
 
         } else {
             // CREATE
@@ -1219,6 +1428,8 @@ exports.createWidgetReservation = async (req, res) => {
         const restaurant = await Restaurant.findById(restaurantId)
             .select("venueName city heroImage");
 
+        await session.commitTransaction();
+
         return res.status(200).json({
             success: true,
             message: reservationId
@@ -1236,11 +1447,17 @@ exports.createWidgetReservation = async (req, res) => {
 
     } catch (error) {
         console.error("Error saving reservation:", error);
+        if (session.inTransaction()) {
+            await session.abortTransaction();
+        }
         return res.status(500).json({
             success: false,
             message: "Error saving reservation.",
             error: error.message
         });
+    } finally {
+
+        session.endSession();
     }
 };
 
@@ -1326,817 +1543,3 @@ exports.getReservationConfirmation = async (req, res) => {
         });
     }
 };
-
-// exports.dashboardSummary = async (req, res) => {
-//     try {
-//         const [stats, newVenues] = await Promise.all([
-//             Restaurant.aggregate([
-//                 {
-//                     $group: {
-//                         _id: null,
-//                         total: { $sum: 1 },
-//                         active: {
-//                             $sum: { $cond: [{ $eq: ["$status", "active"] }, 1, 0] }
-//                         },
-//                         inactive: {
-//                             $sum: { $cond: [{ $eq: ["$status", "inactive"] }, 1, 0] }
-//                         }
-//                     }
-//                 }
-//             ]),
-//             Restaurant.countDocuments({
-//                 createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-//             })
-//         ]);
-
-//         return res.json({
-//             success: true,
-//             data: {
-//                 totalVenues: stats[0]?.total || 0,
-//                 activeVenues: stats[0]?.active || 0,
-//                 inactiveVenues: stats[0]?.inactive || 0,
-//                 newVenuesLast30Days: newVenues
-//             }
-//         });
-//     } catch (err) {
-//         res.status(500).json({ success: false, message: err.message });
-//     }
-// };
-
-// exports.getMonthlyGraph = async (req, res) => {
-//     try {
-//         const user = req.user;
-//         const { restaurantId, startDate, endDate } = req.body;
-
-//         let matchQuery = {};
-
-//         /* ================= ADMIN ================= */
-//         if (user.role === "admin") {
-
-//             if (restaurantId) {
-//                 if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
-//                     return res.status(400).json({
-//                         success: false,
-//                         message: "Invalid restaurantId"
-//                     });
-//                 }
-//                 matchQuery.restaurantId = new mongoose.Types.ObjectId(restaurantId);
-//             }
-
-//         }
-//         /* ================= RESTAURANT USER ================= */
-//         else {
-//             if (!user.restaurantId) {
-//                 return res.status(400).json({
-//                     success: false,
-//                     message: "Restaurant not linked with this user"
-//                 });
-//             }
-//             matchQuery.restaurantId = new mongoose.Types.ObjectId(user.restaurantId);
-//         }
-
-//         /* ================= DATE FILTER ================= */
-//         if (startDate || endDate) {
-//             matchQuery.createdAt = {};
-
-//             if (startDate) {
-//                 matchQuery.createdAt.$gte = new Date(startDate);
-//             }
-
-//             if (endDate) {
-//                 const end = new Date(endDate);
-//                 end.setHours(23, 59, 59, 999); // poora din cover
-//                 matchQuery.createdAt.$lte = end;
-//             }
-//         }
-
-//         const data = await Reservation.aggregate([
-//             { $match: matchQuery },
-//             {
-//                 $group: {
-//                     _id: { $month: "$createdAt" },
-
-//                     confirmed: {
-//                         $sum: {
-//                             $cond: [{ $eq: ["$status", "Confirmed"] }, 1, 0]
-//                         }
-//                     },
-
-//                     cancelled: {
-//                         $sum: {
-//                             $cond: [{ $eq: ["$status", "Canceled"] }, 1, 0]
-//                         }
-//                     },
-
-//                     revenue: {
-//                         $sum: {
-//                             $cond: [{ $eq: ["$status", "Confirmed"] }, "$totalAmount", 0]
-//                         }
-//                     }
-//                 }
-//             },
-//             { $sort: { "_id": 1 } }
-//         ]);
-
-//         const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-//         const formatted = months.map((month, index) => {
-//             const found = data.find(d => d._id === index + 1);
-//             return {
-//                 month,
-//                 confirmed: found?.confirmed || 0,
-//                 cancelled: found?.cancelled || 0,
-//                 revenue: found?.revenue || 0
-//             };
-//         });
-
-//         return res.status(200).json({
-//             success: true,
-//             message: "Monthly reservation performance fetched successfully",
-//             data: formatted
-//         });
-
-//     } catch (error) {
-//         console.error("Monthly performance API error:", error);
-//         return res.status(500).json({
-//             success: false,
-//             message: "Error fetching monthly performance",
-//             error: error.message
-//         });
-//     }
-// };
-
-// exports.getReservationList = async (req, res) => {
-//     try {
-//         const {
-//             page = 1,
-//             limit = 10,
-//             search,
-//             restaurantId,
-//             status,
-//             source,
-//             seating,
-//             shiftId,
-//             fromDate,
-//             toDate,
-//             partySize
-//         } = req.body;
-
-//         const skip = (page - 1) * limit;
-
-//         let filter = {};
-
-//         // 🔹 Filters
-//         if (restaurantId && mongoose.Types.ObjectId.isValid(restaurantId)) {
-//             filter.restaurantId = restaurantId;
-//         }
-
-//         if (status) {
-//             filter.status = status;
-//         }
-
-//         if (source) {
-//             filter.source = source;
-//         }
-
-//         if (seating) {
-//             filter.seating = seating;
-//         }
-
-//         if (shiftId && mongoose.Types.ObjectId.isValid(shiftId)) {
-//             filter.shiftId = shiftId;
-//         }
-
-//         if (partySize) {
-//             filter.partySize = partySize;
-//         }
-
-//         // 🔹 Date Range Filter
-//         if (fromDate || toDate) {
-//             filter.date = {};
-//             if (fromDate) filter.date.$gte = new Date(fromDate);
-//             if (toDate) filter.date.$lte = new Date(toDate);
-//         }
-
-//         // 🔹 Global Search
-//         if (search) {
-//             filter.$or = [
-//                 { firstName: { $regex: search, $options: "i" } },
-//                 { lastName: { $regex: search, $options: "i" } },
-//                 { guestEmail: { $regex: search, $options: "i" } },
-//                 { guestPhone: { $regex: search, $options: "i" } },
-//                 { notes: { $regex: search, $options: "i" } },
-//                 { tags: { $in: [new RegExp(search, "i")] } }
-//             ];
-//         }
-
-//         const [reservations, total] = await Promise.all([
-//             Reservation.find(filter)
-//                 .populate("restaurantId", "name email phone")
-//                 .populate("tableId", "tableNumber")
-//                 .populate("shiftId", "name startTime endTime")
-//                 .sort({ createdAt: -1 })
-//                 .skip(skip)
-//                 .limit(parseInt(limit)),
-
-//             Reservation.countDocuments(filter)
-//         ]);
-
-//         return res.status(200).json({
-//             success: true,
-//             message: "Reservation list fetched successfully",
-//             data: reservations,
-//             pagination: {
-//                 totalRecords: total,
-//                 currentPage: parseInt(page),
-//                 totalPages: Math.ceil(total / limit),
-//                 limit: parseInt(limit)
-//             }
-//         });
-
-//     } catch (error) {
-//         console.error("Admin reservation list error:", error);
-//         return res.status(500).json({
-//             success: false,
-//             message: "Failed to fetch reservations",
-//             error: error.message
-//         });
-//     }
-// };
-
-// exports.bookingStats = async (req, res) => {
-//     try {
-//         const now = new Date();
-
-//         const startOfToday = new Date(now.setHours(0, 0, 0, 0));
-//         const startOfWeek = new Date();
-//         startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-//         startOfWeek.setHours(0, 0, 0, 0);
-
-//         const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-//         const startOfYear = new Date(new Date().getFullYear(), 0, 1);
-
-//         const [today, wtd, mtd, ytd] = await Promise.all([
-//             Reservation.countDocuments({ createdAt: { $gte: startOfToday } }),
-//             Reservation.countDocuments({ createdAt: { $gte: startOfWeek } }),
-//             Reservation.countDocuments({ createdAt: { $gte: startOfMonth } }),
-//             Reservation.countDocuments({ createdAt: { $gte: startOfYear } })
-//         ]);
-
-//         res.json({
-//             success: true,
-//             data: {
-//                 today,
-//                 weekToDate: wtd,
-//                 monthToDate: mtd,
-//                 yearToDate: ytd
-//             }
-//         });
-//     } catch (err) {
-//         res.status(500).json({ success: false, message: err.message });
-//     }
-// };
-
-// exports.bookingTrend24h = async (req, res) => {
-//     try {
-//         const start = new Date();
-//         start.setHours(start.getHours() - 24);
-
-//         const trend = await Reservation.aggregate([
-//             { $match: { createdAt: { $gte: start } } },
-//             {
-//                 $group: {
-//                     _id: { hour: { $hour: "$createdAt" } },
-//                     count: { $sum: 1 }
-//                 }
-//             },
-//             { $sort: { "_id.hour": 1 } }
-//         ]);
-
-//         res.json({
-//             success: true,
-//             data: trend.map(t => ({
-//                 hour: `${t._id.hour}:00`,
-//                 count: t.count
-//             }))
-//         });
-//     } catch (err) {
-//         res.status(500).json({ success: false, message: err.message });
-//     }
-// };
-
-// exports.mostActiveVenues = async (req, res) => {
-//     try {
-//         const data = await Reservation.aggregate([
-//             {
-//                 $group: {
-//                     _id: "$restaurantId",
-//                     totalBookings: { $sum: 1 }
-//                 }
-//             },
-//             { $sort: { totalBookings: -1 } },
-//             { $limit: 5 },
-//             {
-//                 $lookup: {
-//                     from: "restaurants",
-//                     localField: "_id",
-//                     foreignField: "_id",
-//                     as: "restaurant"
-//                 }
-//             },
-//             { $unwind: "$restaurant" }
-//         ]);
-
-//         res.json({
-//             success: true,
-//             data: data.map(d => ({
-//                 restaurantName: d.restaurant.name,
-//                 totalBookings: d.totalBookings
-//             }))
-//         });
-//     } catch (err) {
-//         res.status(500).json({ success: false, message: err.message });
-//     }
-// };
-
-// exports.getRemiUsers = async (req, res) => {
-//     try {
-//         const { range = "12m" } = req.query;
-
-//         /* ================= DATE RANGE ================= */
-//         const now = new Date();
-//         let startDate = new Date();
-
-//         switch (range) {
-//             case "24h": startDate.setHours(now.getHours() - 24); break;
-//             case "7d": startDate.setDate(now.getDate() - 7); break;
-//             case "30d": startDate.setDate(now.getDate() - 30); break;
-//             case "3m": startDate.setMonth(now.getMonth() - 3); break;
-//             default: startDate.setMonth(now.getMonth() - 12);
-//         }
-
-//         const REMI_REGEX = /(Remi user|Remi influencer)/i;
-
-//         /* ================= TOTAL REMI USERS ================= */
-//         const totalRemiUsersPromise = Guest.countDocuments({
-//             tags: { $elemMatch: { $regex: REMI_REGEX } }
-//         });
-
-//         /* ================= NEW REMI USERS ================= */
-//         const newRemiUsersPromise = Guest.countDocuments({
-//             tags: { $elemMatch: { $regex: REMI_REGEX } },
-//             createdAt: { $gte: startDate }
-//         });
-
-//         /* ================= MOST ACTIVE VENUES ================= */
-//         const mostActiveVenuesPromise = Reservation.aggregate([
-//             {
-//                 $match: {
-//                     createdAt: { $gte: startDate }
-//                 }
-//             },
-//             {
-//                 $lookup: {
-//                     from: "guests",
-//                     localField: "guestId",
-//                     foreignField: "_id",
-//                     as: "guest"
-//                 }
-//             },
-//             { $unwind: "$guest" },
-//             {
-//                 $match: {
-//                     "guest.tags": { $elemMatch: { $regex: REMI_REGEX } }
-//                 }
-//             },
-//             {
-//                 $group: {
-//                     _id: {
-//                         restaurantId: "$restaurantId",
-//                         guestId: "$guestId"
-//                     }
-//                 }
-//             },
-//             {
-//                 $group: {
-//                     _id: "$_id.restaurantId",
-//                     remiUsers: { $sum: 1 }
-//                 }
-//             },
-//             {
-//                 $lookup: {
-//                     from: "restaurants",
-//                     localField: "_id",
-//                     foreignField: "_id",
-//                     as: "restaurant"
-//                 }
-//             },
-//             { $unwind: "$restaurant" },
-//             {
-//                 $project: {
-//                     restaurantId: "$_id",
-//                     restaurantName: "$restaurant.name",
-//                     remiUsers: 1,
-//                     _id: 0
-//                 }
-//             },
-//             { $sort: { remiUsers: -1 } },
-//             { $limit: 5 }
-//         ]);
-
-//         /* ================= TREND ================= */
-//         const trendPromise = Guest.aggregate([
-//             {
-//                 $match: {
-//                     tags: { $elemMatch: { $regex: REMI_REGEX } },
-//                     createdAt: { $gte: startDate }
-//                 }
-//             },
-//             {
-//                 $group: {
-//                     _id: {
-//                         month: { $month: "$createdAt" },
-//                         year: { $year: "$createdAt" }
-//                     },
-//                     count: { $sum: 1 }
-//                 }
-//             },
-//             { $sort: { "_id.year": 1, "_id.month": 1 } }
-//         ]);
-
-//         const [
-//             totalRemiUsers,
-//             newRemiUsers,
-//             mostActiveVenues,
-//             trendRaw
-//         ] = await Promise.all([
-//             totalRemiUsersPromise,
-//             newRemiUsersPromise,
-//             mostActiveVenuesPromise,
-//             trendPromise
-//         ]);
-
-//         return res.json({
-//             success: true,
-//             data: {
-//                 summary: {
-//                     totalRemiUsers,
-//                     newRemiUsers,
-//                     growthPercent: totalRemiUsers
-//                         ? Math.round((newRemiUsers / totalRemiUsers) * 100)
-//                         : 0
-//                 },
-//                 mostActiveVenues,
-//                 trend: trendRaw.map(t => ({
-//                     label: `${t._id.month}/${t._id.year}`,
-//                     count: t.count
-//                 }))
-//             }
-//         });
-
-//     } catch (error) {
-//         console.error("Remi Dashboard Error:", error);
-//         res.status(500).json({
-//             success: false,
-//             message: "Failed to load Remi dashboard",
-//             error: error.message
-//         });
-//     }
-// };
-
-// exports.getNoShowRiskVenues = async (req, res) => {
-//     try {
-//         const { range = "12m" } = req.query;
-
-//         /* ================= DATE RANGE ================= */
-//         const now = new Date();
-//         let startDate = new Date();
-
-//         switch (range) {
-//             case "24h": startDate.setHours(now.getHours() - 24); break;
-//             case "7d": startDate.setDate(now.getDate() - 7); break;
-//             case "30d": startDate.setDate(now.getDate() - 30); break;
-//             case "3m": startDate.setMonth(now.getMonth() - 3); break;
-//             default: startDate.setMonth(now.getMonth() - 12);
-//         }
-
-//         /* ================= AGGREGATION ================= */
-//         const data = await Reservation.aggregate([
-//             {
-//                 $match: {
-//                     createdAt: { $gte: startDate }
-//                 }
-//             },
-//             {
-//                 $group: {
-//                     _id: "$restaurantId",
-//                     totalReservations: { $sum: 1 },
-//                     noShows: {
-//                         $sum: {
-//                             $cond: [{ $eq: ["$status", "No-show"] }, 1, 0]
-//                         }
-//                     }
-//                 }
-//             },
-//             {
-//                 $project: {
-//                     totalReservations: 1,
-//                     noShows: 1,
-//                     noShowRate: {
-//                         $multiply: [
-//                             { $divide: ["$noShows", "$totalReservations"] },
-//                             100
-//                         ]
-//                     }
-//                 }
-//             },
-//             {
-//                 $match: {
-//                     noShowRate: { $gt: 15 }
-//                 }
-//             },
-//             {
-//                 $lookup: {
-//                     from: "restaurants",
-//                     localField: "_id",
-//                     foreignField: "_id",
-//                     as: "restaurant"
-//                 }
-//             },
-//             { $unwind: "$restaurant" },
-//             {
-//                 $project: {
-//                     restaurantId: "$_id",
-//                     restaurantName: "$restaurant.name",
-//                     noShowRate: { $round: ["$noShowRate", 1] },
-//                     _id: 0
-//                 }
-//             },
-//             { $sort: { noShowRate: -1 } },
-//             { $limit: 4 }
-//         ]);
-
-//         return res.json({
-//             success: true,
-//             count: data.length,
-//             data
-//         });
-
-//     } catch (error) {
-//         console.error("No-show Risk Error:", error);
-//         res.status(500).json({
-//             success: false,
-//             message: "Failed to fetch no-show risk data",
-//             error: error.message
-//         });
-//     }
-// };
-
-// exports.createReservation = async (req, res) => {
-//     try {
-//         const {
-//             reservationId, // 🔥 NEW (optional)
-
-//             restaurantId,
-//             tableId,
-
-//             // Guest fields
-//             firstName,
-//             lastName,
-//             guestEmail,
-//             guestPhone,
-//             gender,
-//             dob,
-
-//             // Reservation fields
-//             date,
-//             time,
-//             partySize,
-//             source,
-//             status,
-//             seating,
-//             tags,
-//             notes
-//         } = req.body;
-
-//         if (!restaurantId || !date || !time) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "restaurantId, date & time are required."
-//             });
-//         }
-
-//         const reservationDate = new Date(date);
-//         const weekdayName = reservationDate.toLocaleDateString("en-US", {
-//             weekday: "long"
-//         });
-
-//         /* ---------------------------------------------------
-//            🔹 SHIFT LOGIC (UNCHANGED)
-//         --------------------------------------------------- */
-
-//         const allShifts = await Shift.find({
-//             restaurantId,
-//             isActive: true,
-//             $or: [
-//                 { type: "Recurring", daysActive: { $in: [weekdayName] } },
-//                 {
-//                     type: "Special",
-//                     startDate: { $lte: reservationDate },
-//                     endDate: { $gte: reservationDate }
-//                 }
-//             ]
-//         });
-
-//         if (!allShifts.length) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "No shifts available for this day."
-//             });
-//         }
-
-//         const [hh, mm] = time.split(":").map(Number);
-//         const reservationMinutes = hh * 60 + mm;
-
-//         const toMinutes = t => {
-//             const [h, m] = t.split(":").map(Number);
-//             return h * 60 + m;
-//         };
-
-//         let shift = allShifts.find(s => {
-//             const start = toMinutes(s.startTime);
-//             const end = toMinutes(s.endTime);
-//             return reservationMinutes >= start && reservationMinutes < end;
-//         });
-
-//         if (!shift) {
-//             let nearest = null;
-//             let minDiff = Infinity;
-
-//             allShifts.forEach(s => {
-//                 const diff = Math.abs(reservationMinutes - toMinutes(s.startTime));
-//                 if (diff < minDiff) {
-//                     minDiff = diff;
-//                     nearest = s;
-//                 }
-//             });
-
-//             if (minDiff > 60) {
-//                 return res.status(400).json({
-//                     success: false,
-//                     message: "Reservation time is outside all shift timings."
-//                 });
-//             }
-
-//             shift = nearest;
-//         }
-
-//         /* ---------------------------------------------------
-//            🔹 TABLE AVAILABILITY (EXCLUDE SELF IF UPDATE)
-//         --------------------------------------------------- */
-
-//         if (tableId) {
-//             const conflictQuery = {
-//                 restaurantId,
-//                 tableId,
-//                 date: reservationDate,
-//                 time,
-//                 status: { $nin: ["Cancelled", "No-show"] }
-//             };
-
-//             if (reservationId) {
-//                 conflictQuery._id = { $ne: reservationId };
-//             }
-
-//             const existing = await Reservation.findOne(conflictQuery);
-
-//             if (existing) {
-//                 return res.status(400).json({
-//                     success: false,
-//                     message: "This table is already reserved for the selected date & time."
-//                 });
-//             }
-//         }
-
-//         /* ---------------------------------------------------
-//            🔹 CREATE / UPDATE GUEST (UNCHANGED)
-//         --------------------------------------------------- */
-
-//         let guest = null;
-
-//         if (guestPhone) {
-//             guest = await Guest.findOne({ restaurantId, phone: guestPhone });
-//         }
-
-//         if (!guest && guestEmail) {
-//             guest = await Guest.findOne({
-//                 restaurantId,
-//                 email: guestEmail.toLowerCase()
-//             });
-//         }
-
-//         if (guest) {
-//             guest.firstName = firstName || guest.firstName;
-//             guest.lastName = lastName || guest.lastName;
-//             guest.phone = guestPhone || guest.phone;
-//             guest.email = guestEmail || guest.email;
-//             guest.gender = gender || guest.gender;
-//             guest.dob = dob || guest.dob;
-
-//             if (tags?.length) {
-//                 guest.tags = [...new Set([...guest.tags, ...tags])];
-//             }
-
-//             await guest.save();
-//         } else {
-//             guest = await Guest.create({
-//                 restaurantId,
-//                 firstName,
-//                 lastName,
-//                 phone: guestPhone,
-//                 email: guestEmail,
-//                 gender,
-//                 dob,
-//                 tags,
-//                 notes
-//             });
-//         }
-
-//         /* ---------------------------------------------------
-//            🔹 CREATE OR UPDATE RESERVATION
-//         --------------------------------------------------- */
-
-//         let reservation;
-
-//         if (reservationId) {
-//             reservation = await Reservation.findByIdAndUpdate(
-//                 reservationId,
-//                 {
-//                     restaurantId,
-//                     guestId: guest._id,
-//                     tableId,
-//                     shiftId: shift._id,
-//                     date: reservationDate,
-//                     time,
-//                     partySize,
-//                     source,
-//                     status,
-//                     seating,
-//                     tags,
-//                     notes
-//                 },
-//                 { new: true }
-//             );
-
-//             if (!reservation) {
-//                 return res.status(404).json({
-//                     success: false,
-//                     message: "Reservation not found."
-//                 });
-//             }
-//         } else {
-//             reservation = await Reservation.create({
-//                 restaurantId,
-//                 guestId: guest._id,
-//                 tableId,
-//                 shiftId: shift._id,
-//                 date: reservationDate,
-//                 time,
-//                 partySize,
-//                 source,
-//                 status,
-//                 seating,
-//                 tags,
-//                 notes
-//             });
-//         }
-
-//         /* ---------------------------------------------------
-//            🔹 UPDATE UPCOMING VISIT
-//         --------------------------------------------------- */
-
-//         await Guest.findByIdAndUpdate(guest._id, {
-//             upcomingVisitAt: reservationDate
-//         });
-
-//         return res.status(201).json({
-//             success: true,
-//             message: reservationId
-//                 ? "Reservation updated successfully."
-//                 : "Reservation created successfully.",
-//             assignedShift: shift.name,
-//             data: {
-//                 reservation,
-//                 guest
-//             }
-//         });
-
-//     } catch (error) {
-//         console.error("Reservation error:", error);
-//         return res.status(500).json({
-//             success: false,
-//             message: "Error processing reservation.",
-//             error: error.message
-//         });
-//     }
-// };

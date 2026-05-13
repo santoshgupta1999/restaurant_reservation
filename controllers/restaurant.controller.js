@@ -767,6 +767,7 @@ exports.createShift = async (req, res) => {
 
         let payload = { ...req.body };
 
+        /* ================= TIME CONVERSION ================= */
         if (payload.startTime) {
             payload.startTime = convertTo24Hour(payload.startTime);
         }
@@ -779,12 +780,12 @@ exports.createShift = async (req, res) => {
             payload.lastBookableTime = convertTo24Hour(payload.lastBookableTime);
         }
 
+        /* ================= INDEFINITE ================= */
         if (payload.isIndefinite) {
             payload.endDate = null;
         }
 
         const shiftId = payload.id || payload._id;
-
         delete payload.id;
         delete payload._id;
 
@@ -798,6 +799,30 @@ exports.createShift = async (req, res) => {
         /* ================= PAYMENT LOGIC ================= */
         if (!payload.includePayment) {
             payload.payment = undefined;
+        }
+
+        const { restaurantId, startDate, startTime, endTime } = payload;
+
+        /* ================= OVERLAP CHECK (BEFORE SAVE) ================= */
+        const overlapQuery = {
+            restaurantId,
+            startDate,
+            startTime: { $lt: endTime },
+            endTime: { $gt: startTime }
+        };
+
+        // Exclude current shift in update case
+        if (shiftId) {
+            overlapQuery._id = { $ne: shiftId };
+        }
+
+        const overlappingShift = await Shift.findOne(overlapQuery);
+
+        if (overlappingShift) {
+            return res.status(400).json({
+                success: false,
+                message: "Shift overlaps with an existing shift"
+            });
         }
 
         let shift;
@@ -814,30 +839,6 @@ exports.createShift = async (req, res) => {
                 return res.status(404).json({
                     success: false,
                     message: "Shift not found"
-                });
-            }
-
-            /* ================= OVERLAP CHECK ================= */
-
-            const { restaurantId, startDate, startTime, endTime } = payload;
-
-            const overlapQuery = {
-                restaurantId,
-                startDate,
-                startTime: { $lt: endTime },
-                endTime: { $gt: startTime }
-            };
-
-            if (shiftId) {
-                overlapQuery._id = { $ne: shiftId };
-            }
-
-            const overlappingShift = await Shift.findOne(overlapQuery);
-
-            if (overlappingShift) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Shift overlaps with an existing shift"
                 });
             }
 
@@ -1247,7 +1248,7 @@ exports.updateShiftStatus = async (req, res) => {
     }
 };
 
-const DEFAULT_TIMEZONE = process.env.APP_TIMEZONE || "Asia/Kolkata";
+const DEFAULT_TIMEZONE = process.env.APP_TIMEZONE;
 
 exports.getRestaurantSlots = async (req, res) => {
     try {

@@ -194,7 +194,7 @@ exports.getGuests = async (req, res) => {
                                     $and: [
                                         { $eq: ["$guestId", "$$guestId"] },
                                         { $eq: ["$restaurantId", new mongoose.Types.ObjectId(restaurantId)] },
-                                        { $in: ["$status", ["Pending", "Confirmed"]] },
+                                        { $in: ["$status", ["Pending", "Confirmed", "Upcoming"]] },
                                         { $gt: ["$date", today] }
                                     ]
                                 }

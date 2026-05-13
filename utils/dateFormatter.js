@@ -1,43 +1,97 @@
 const moment = require("moment-timezone");
 
 /* ================= CONFIG ================= */
-const DEFAULT_TIMEZONE = process.env.APP_TIMEZONE || "Asia/Kolkata";
+
+const FALLBACK_TIMEZONE =
+    process.env.APP_TIMEZONE || "UTC";
+
 const DEFAULT_FORMAT = "DD/MM/YYYY hh:mm A";
 const DATE_ONLY_FORMAT = "DD/MM/YYYY";
 const TIME_ONLY_FORMAT = "hh:mm A";
 
+/* ================= HELPERS ================= */
+
+const resolveTimezone = (timezone) =>
+    timezone || FALLBACK_TIMEZONE;
+
 /* ================= FORMATTERS ================= */
 
-const formatDateTime = (value, timezone = DEFAULT_TIMEZONE) => {
+const formatDateTime = (
+    value,
+    timezone
+) => {
+
     if (!value) return null;
-    return moment(value).tz(timezone).format(DEFAULT_FORMAT);
+
+    return moment(value)
+        .tz(resolveTimezone(timezone))
+        .format(DEFAULT_FORMAT);
 };
 
-const formatDate = (value, timezone = DEFAULT_TIMEZONE) => {
+const formatDate = (
+    value,
+    timezone
+) => {
+
     if (!value) return null;
-    return moment(value).tz(timezone).format(DATE_ONLY_FORMAT);
+
+    return moment(value)
+        .tz(resolveTimezone(timezone))
+        .format(DATE_ONLY_FORMAT);
 };
 
-const formatTime = (value, timezone = DEFAULT_TIMEZONE) => {
+const formatTime = (
+    value,
+    timezone
+) => {
+
     if (!value) return null;
-    return moment(value, ["HH:mm", "hh:mm A"])
-        .tz(timezone)
+
+    return moment(
+        value,
+        ["HH:mm", "hh:mm A"]
+    )
+        .tz(resolveTimezone(timezone))
         .format(TIME_ONLY_FORMAT);
 };
 
 /* ================= RAW + FORMATTED ================= */
 
-const formatWithRaw = (value, type = "datetime", timezone = DEFAULT_TIMEZONE) => {
-    if (!value) return { raw: null, formatted: null };
+const formatWithRaw = (
+    value,
+    type = "datetime",
+    timezone
+) => {
+
+    if (!value) {
+        return {
+            raw: null,
+            formatted: null
+        };
+    }
 
     let formatted;
 
     if (type === "date") {
-        formatted = formatDate(value, timezone);
+
+        formatted = formatDate(
+            value,
+            timezone
+        );
+
     } else if (type === "time") {
-        formatted = formatTime(value, timezone);
+
+        formatted = formatTime(
+            value,
+            timezone
+        );
+
     } else {
-        formatted = formatDateTime(value, timezone);
+
+        formatted = formatDateTime(
+            value,
+            timezone
+        );
     }
 
     return {

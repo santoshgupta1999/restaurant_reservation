@@ -1,52 +1,140 @@
 const cron = require("node-cron");
+const moment = require("moment-timezone");
+
 const Reservation = require("../models/reservation.model");
 const Table = require("../models/table.model");
 
 cron.schedule("*/5 * * * *", async () => {
+
     try {
-        const now = new Date();
 
-        const expiredReservations = await Reservation.find({
-            status: { $in: ["Pending", "Confirmed"] }
-        });
+        const reservations = await Reservation.find({
+            status: {
+                $in: ["Pending", "Confirmed", "Upcoming"]
+            }
+        })
+            .populate("restaurantId", "timezone")
+            .select("_id tableIds date time status restaurantId");
 
-        const toUpdate = [];
+        const upcomingIds = [];
+        const noShowIds = [];
+        const tableIds = [];
 
-        for (let reservation of expiredReservations) {
+        for (const reservation of reservations) {
 
-            const dateString = new Date(reservation.date)
-                .toISOString()
-                .split("T")[0];
+            // fallback timezone
+            const timezone =
+                reservation.restaurantId?.timezone ||
+                "Asia/Kolkata";
 
-            const bookingDateTime = new Date(
-                `${dateString}T${reservation.time}:00+05:30`
+            // CURRENT TIME IN VENUE TIMEZONE
+            const now = moment().tz(timezone);
+
+            // BOOKING DATETIME
+            const bookingDateTime = moment.tz(
+                `${moment(reservation.date).format("YYYY-MM-DD")} ${reservation.time}`,
+                "YYYY-MM-DD HH:mm",
+                timezone
             );
 
-            if (bookingDateTime < now) {
-                toUpdate.push(reservation);
+            // 3 HOURS BEFORE
+            const upcomingTime = bookingDateTime
+                .clone()
+                .subtract(2, "hours");
+
+            /*
+                CASE 1:
+                Pending/Confirmed -> Upcoming
+            */
+            if (
+                now.isSameOrAfter(upcomingTime) &&
+                now.isBefore(bookingDateTime) &&
+                ["Pending", "Confirmed"].includes(reservation.status)
+            ) {
+                upcomingIds.push(reservation._id);
+            }
+
+            /*
+                CASE 2:
+                Booking time passed -> No-Show
+            */
+            if (
+                now.isSameOrAfter(bookingDateTime) &&
+                ["Pending", "Confirmed", "Upcoming"].includes(
+                    reservation.status
+                )
+            ) {
+
+                noShowIds.push(reservation._id);
+
+                // MULTI TABLE SUPPORT
+                if (
+                    reservation.tableIds &&
+                    reservation.tableIds.length
+                ) {
+                    tableIds.push(...reservation.tableIds);
+                }
             }
         }
 
-        if (toUpdate.length === 0) return;
+        // UPDATE UPCOMING
+        if (upcomingIds.length) {
 
-        const reservationIds = toUpdate.map(r => r._id);
-        const tableIds = toUpdate
-            .filter(r => r.tableId)
-            .map(r => r.tableId);
+            await Reservation.updateMany(
+                {
+                    _id: { $in: upcomingIds }
+                },
+                {
+                    $set: {
+                        status: "Upcoming"
+                    }
+                }
+            );
 
-        await Reservation.updateMany(
-            { _id: { $in: reservationIds } },
-            { $set: { status: "No-show" } }
-        );
+            console.log(
+                `${upcomingIds.length} reservations moved to Upcoming`
+            );
+        }
 
-        await Table.updateMany(
-            { _id: { $in: tableIds } },
-            { $set: { status: "Available" } }
-        );
+        // UPDATE NO-SHOW
+        if (noShowIds.length) {
 
-        console.log("Auto No-show update done");
+            await Reservation.updateMany(
+                {
+                    _id: { $in: noShowIds }
+                },
+                {
+                    $set: {
+                        status: "No-Show"
+                    }
+                }
+            );
+
+            // FREE ALL TABLES
+            if (tableIds.length) {
+
+                await Table.updateMany(
+                    {
+                        _id: { $in: tableIds }
+                    },
+                    {
+                        $set: {
+                            status: "Available"
+                        }
+                    }
+                );
+            }
+
+            console.log(
+                `${noShowIds.length} reservations moved to No-Show`
+            );
+        }
 
     } catch (error) {
-        console.error("Auto reservation error:", error);
+
+        console.error(
+            "Reservation cron error:",
+            error
+        );
     }
 });

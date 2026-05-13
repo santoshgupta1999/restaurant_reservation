@@ -94,7 +94,7 @@ exports.createTable = async (req, res) => {
                                     max: t.max || t.capacity || 6,
                                     width: t.width || 0,
                                     length: t.length || 0,
-                                    channel: t.channel || "Online & FOH",
+                                    channel: t.channel || "online_foh",
                                     shape: t.shape || "Square",
                                     status: t.status || "Available",
                                     position: t.position,
@@ -1398,9 +1398,15 @@ exports.updateTableStatus = async (req, res) => {
         const { id } = req.params;
         const { status, source, partySize } = req.body;
 
-        const allowedStatuses = ["Available", "Reserved", "Seated", "OutOfService"];
+        const allowedStatuses = [
+            "Available",
+            "Reserved",
+            "Seated",
+            "OutOfService"
+        ];
 
         if (!allowedStatuses.includes(status)) {
+
             return res.status(400).json({
                 success: false,
                 message: `Invalid status. Allowed values: ${allowedStatuses.join(", ")}`
@@ -1410,6 +1416,7 @@ exports.updateTableStatus = async (req, res) => {
         const table = await Table.findById(id);
 
         if (!table) {
+
             return res.status(404).json({
                 success: false,
                 message: "Table not found."
@@ -1424,23 +1431,49 @@ exports.updateTableStatus = async (req, res) => {
         const todayEnd = new Date();
         todayEnd.setHours(23, 59, 59, 999);
 
+        /*
+        ==========================================
+        TABLE -> SEATED
+        ==========================================
+        */
         if (status === "Seated") {
 
-            // Try to seat existing reservation first
-            updatedReservation = await Reservation.findOneAndUpdate(
-                {
-                    tableId: id,
-                    date: { $gte: todayStart, $lte: todayEnd },
-                    status: { $in: ["Pending", "Confirmed"] }
+            // First try existing reservation
+            updatedReservation = await Reservation.findOne({
+                tableId: id,
+                date: {
+                    $gte: todayStart,
+                    $lte: todayEnd
                 },
-                { status: "Seated" },
-                { new: true, sort: { time: 1 } }
-            );
+                status: {
+                    $in: ["Pending", "Confirmed", "Upcoming", "Arrived"]
+                }
+            }).sort({ time: 1 });
 
-            // If no reservation found & source is Walk-in
+            // EXISTING RESERVATION
+            if (updatedReservation) {
+
+                updatedReservation.status = "Seated";
+
+                // immutable timestamps
+                if (!updatedReservation.arrivedAt) {
+                    updatedReservation.arrivedAt = new Date();
+                }
+
+                if (!updatedReservation.seatedAt) {
+                    updatedReservation.seatedAt = new Date();
+                }
+
+                await updatedReservation.save();
+            }
+
+            /*
+            WALK-IN FLOW
+            */
             if (!updatedReservation && source === "Walk-in") {
 
                 if (!partySize) {
+
                     return res.status(400).json({
                         success: false,
                         message: "partySize is required for walk-in seating."
@@ -1448,57 +1481,103 @@ exports.updateTableStatus = async (req, res) => {
                 }
 
                 if (partySize > table.capacity) {
+
                     return res.status(400).json({
                         success: false,
                         message: "Party size exceeds table capacity."
                     });
                 }
 
+                const now = new Date();
+
                 updatedReservation = await Reservation.create({
+
                     restaurantId: table.restaurantId,
                     tableId: id,
                     shiftId: null,
-                    date: new Date(),
-                    time: new Date().toTimeString().slice(0, 5),
+
+                    date: now,
+
+                    time: now.toTimeString().slice(0, 5),
+
                     partySize,
+
                     source: "Walk-in",
-                    status: "Seated"
+
+                    status: "Seated",
+
+                    // timestamps
+                    arrivedAt: now,
+                    seatedAt: now
                 });
             }
         }
 
+        /*
+        ==========================================
+        TABLE -> AVAILABLE
+        ==========================================
+        */
         if (status === "Available") {
-            updatedReservation = await Reservation.findOneAndUpdate(
-                {
-                    tableId: id,
-                    date: { $gte: todayStart, $lte: todayEnd },
-                    status: "Seated"
+
+            updatedReservation = await Reservation.findOne({
+                tableId: id,
+                date: {
+                    $gte: todayStart,
+                    $lte: todayEnd
                 },
-                { status: "Finished" },
-                { new: true, sort: { time: -1 } }
-            );
+                status: "Seated"
+            }).sort({ time: -1 });
+
+            if (updatedReservation) {
+
+                updatedReservation.status = "Finished";
+
+                // immutable finishedAt
+                if (!updatedReservation.finishedAt) {
+                    updatedReservation.finishedAt = new Date();
+                }
+
+                await updatedReservation.save();
+            }
         }
 
-        // Finally update table status
+        /*
+        ==========================================
+        UPDATE TABLE STATUS
+        ==========================================
+        */
+
         table.status = status;
+
         await table.save();
 
         return res.status(200).json({
+
             success: true,
+
             message: `Table status updated successfully to ${status}.`,
+
             data: {
+
                 table: {
                     id: table._id,
                     tableNumber: table.tableNumber,
                     capacity: table.capacity,
                     status: table.status
                 },
+
                 reservationUpdated: updatedReservation || null
             }
         });
 
     } catch (error) {
-        console.error("Error updating table status:", error);
+
+        console.error(
+            "Error updating table status:",
+            error
+        );
+
         return res.status(500).json({
             success: false,
             message: error.message || "Error updating table status."

@@ -6,7 +6,8 @@ const Restaurant = require("../models/Restaurant.model");
 const TYPES = {
     CONFIRMED: "Confirmed",
     CANCELLED: "Cancelled",
-    UPDATED: "Updated"
+    UPDATED: "Updated",
+    REMINDER: "Reminder"
 };
 
 function convertTo12Hour(time) {
@@ -149,6 +150,42 @@ const sendReservationNotification = async (reservation, guest, type) => {
         City: ${city}
         Reservation ID: ${reservation._id}
         `;
+    } else if (type === TYPES.REMINDER) {
+
+        subject =
+            `Reminder for your reservation at ${restaurant.venueName}`;
+
+        html = await renderTemplate("booking-reminder", {
+            fullName,
+            date: formattedDate,
+            time: convertTo12Hour(reservation.time),
+            partySize: reservation.partySize,
+            reservationNo: reservation.reservationNo,
+            email: guest.email,
+            reservationId: reservation._id,
+            restaurantName: restaurant.venueName,
+            image: restaurant.heroImage,
+            restaurantId: reservation.restaurantId,
+            restaurantPhone,
+            city,
+            restaurantAddress: restaurant.restaurantAddress,
+        });
+
+        text = `
+    Hi ${fullName},
+
+    This is a reminder for your upcoming reservation.
+
+    Date: ${formattedDate}
+    Time: ${convertTo12Hour(reservation.time)}
+    Guests: ${reservation.partySize}
+
+    Restaurant Name: ${restaurant.venueName}
+    Restaurant Phone: ${restaurantPhone}
+    City: ${city}
+
+    Reservation NO: ${reservation.reservationNo}
+    `;
     }
 
     try {

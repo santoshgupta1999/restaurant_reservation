@@ -42,7 +42,7 @@ cron.schedule("*/5 * * * *", async () => {
             );
         }
 
-        console.log(`${shiftIdsToDisable.length} shift(s) disabled`);
+        // console.log(`${shiftIdsToDisable.length} shift(s) disabled`);
 
     } catch (error) {
         console.error("Shift cron error:", error);

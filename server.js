@@ -12,6 +12,8 @@ const reservRouter = require('./routes/reservationRoutes');
 require("./jobs/blockExpiry.job");
 require("./jobs/unlockTable.job");
 require("./jobs/reservationStatus.job");
+require("./jobs/shiftStatus.job");
+require("./jobs/reservationReminder.job");
 
 const app = express();
 app.use(express.json());

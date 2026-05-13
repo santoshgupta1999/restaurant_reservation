@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Booking Reminder</title>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #f4f6f9;
+            font-family: Arial, Helvetica, sans-serif;
+            color: #333333;
+        }
+
+        table {
+            border-spacing: 0;
+        }
+
+        .wrapper {
+            width: 100%;
+            background-color: #f4f6f9;
+            padding: 40px 0;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background-color: #ffffff;
+            margin: auto;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1004f3, #3c27f3);
+            padding: 15px;
+            text-align: center;
+            color: #ffffff;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+
+        .content {
+            padding: 35px 30px;
+        }
+
+        .greeting {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #111827;
+        }
+
+        .message {
+            font-size: 16px;
+            line-height: 1.6;
+            color: #4b5563;
+            margin-bottom: 30px;
+        }
+
+        .details-box {
+            background-color: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .detail-row {
+            padding: 12px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .label {
+            font-weight: bold;
+            color: #374151;
+        }
+
+        .value {
+            color: #111827;
+        }
+
+        .footer-text {
+            font-size: 15px;
+            line-height: 1.6;
+            color: #4b5563;
+        }
+
+        .footer {
+            background-color: #f3f4f6;
+            padding: 18px;
+            text-align: center;
+            font-size: 13px;
+            color: #6b7280;
+        }
+
+        @media only screen and (max-width: 600px) {
+
+            .content {
+                padding: 25px 20px;
+            }
+
+            .header {
+                padding: 24px 20px;
+            }
+
+            .header h1 {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="wrapper">
+
+        <table class="container" role="presentation" width="100%">
+
+            <tr>
+                <td class="header">
+                    <h1>Booking Reminder</h1>
+                </td>
+            </tr>
+
+            <tr>
+                <td class="content">
+
+                    <div class="greeting">
+                        Hi <%= fullName %>,
+                    </div>
+
+                    <div class="message">
+                        This is a reminder for your upcoming reservation.
+                        We look forward to serving you.
+                    </div>
+
+                    <div class="details-box">
+
+                        <div class="detail-row">
+                            <span class="label">📅 Date:</span><br />
+                            <span class="value">
+                                <%= date %>
+                            </span>
+                        </div>
+
+                        <div class="detail-row">
+                            <span class="label">⏰ Time:</span><br />
+                            <span class="value">
+                                <%= time %>
+                            </span>
+                        </div>
+
+                        <div class="detail-row">
+                            <span class="label">👥 Guests:</span><br />
+                            <span class="value">
+                                <%= partySize %>
+                            </span>
+                        </div>
+
+                        <div class="detail-row">
+                            <span class="label">🎟 Reservation No:</span><br />
+                            <span class="value">
+                                <%= reservationNo %>
+                            </span>
+                        </div>
+
+                        <div class="detail-row">
+                            <span class="label">🍽 Restaurant Name:</span><br />
+                            <span class="value">
+                                <%= restaurantName %>
+                            </span>
+                        </div>
+
+                        <div class="detail-row">
+                            <span class="label">📍 Restaurant Address:</span><br />
+                            <span class="value">
+                                <%= city %>
+                            </span>
+                        </div>
+
+                        <div class="detail-row">
+                            <span class="label">📞 Restaurant Phone:</span><br />
+                            <span class="value">
+                                <%= restaurantPhone %>
+                            </span>
+                        </div>
+
+                    </div>
+
+                    <div class="footer-text">
+                        Thank you for choosing us.<br />
+                        We’re excited to welcome you soon.
+                    </div>
+
+                </td>
+            </tr>
+
+            <tr>
+                <td class="footer">
+                    © 2026 Rekki Restaurant. All rights reserved.
+                </td>
+            </tr>
+
+        </table>
+
+    </div>
+
+</body>
+
+</html>

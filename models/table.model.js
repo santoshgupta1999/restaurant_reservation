@@ -52,8 +52,8 @@ const tableSchema = new mongoose.Schema(
 
         channel: {
             type: String,
-            enum: ["Online & FOH", "Online only", "FOH only"],
-            default: "Online & FOH",
+            enum: ["online_foh", "online_only", "foh_only"],
+            default: "online_foh",
         },
 
         shape: {

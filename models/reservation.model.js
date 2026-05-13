@@ -38,12 +38,12 @@ const reservationSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ["Pending", "Confirmed", "Seated", "Cancelled", "No-Show", "Finished"],
+        enum: ["Pending", "Confirmed", "Seated", "Cancelled", "No-Show", "Finished", "Upcoming", "Arrived"],
         default: "Confirmed"
     },
     source: {
         type: String,
-        enum: ["Online", "Walk-in", "Phone", "Email", "Remi"],
+        enum: ["Online", "Walk-in", "Phone", "Email-Message", "Remi"],
         default: "Phone"
     },
     tags: [
@@ -61,8 +61,54 @@ const reservationSchema = new mongoose.Schema({
         default: false
     },
 
+    arrivedAt: {
+        type: Date,
+        default: null
+    },
+
+    seatedAt: {
+        type: Date,
+        default: null
+    },
+
+    finishedAt: {
+        type: Date,
+        default: null
+    },
+
+    reminderSentAt: {
+        type: Date,
+        default: null
+    },
+
+    cancellation: {
+        reason: {
+            type: String,
+            default: null
+        },
+        source: {
+            type: String,
+            enum: ["foh", "guest", "block", "shift", "table"],
+            default: null
+        },
+        actorId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            default: null
+        },
+        at: {
+            type: Date,
+            default: null
+        }
+    },
+
     notes: String
 }, { timestamps: true });
+
+reservationSchema.index({
+    status: 1,
+    date: 1
+});
 
 
 reservationSchema.pre("save", async function (next) {

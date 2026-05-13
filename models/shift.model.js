@@ -50,4 +50,11 @@ const shiftSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
+shiftSchema.index({
+    restaurantId: 1,
+    startDate: 1,
+    startTime: 1,
+    endTime: 1
+});
+
 module.exports = mongoose.model("Shift", shiftSchema);

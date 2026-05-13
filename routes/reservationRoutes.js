@@ -24,7 +24,7 @@ router.put('/update/:id',
 );
 
 router.delete('/:id', reservController.deleteReservationById);
-router.post('/status/:id', reservController.updateReservationStatus);
+router.post('/status/:id', verifyToken, reservController.updateReservationStatus);
 
 router.post('/cancelled/:id', reservController.cancelReservation);
 
