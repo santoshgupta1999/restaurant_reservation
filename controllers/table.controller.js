@@ -8,6 +8,7 @@ const sendMail = require("../utils/mailer");
 const mongoose = require('mongoose');
 const Room = require('../models/room.model');
 const moment = require('moment');
+const { sendReservationNotification } = require('../utils/reservationNotification');
 
 exports.createTable = async (req, res) => {
     try {
@@ -950,151 +951,142 @@ exports.getAvailableTables = async (req, res) => {
     }
 };
 
-// exports.mergeTables = async (req, res) => {
-//     try {
-//         const { tableIds } = req.body;
-
-//         if (!Array.isArray(tableIds) || tableIds.length < 2) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "At least two tableIds are required to merge."
-//             });
-//         }
-
-//         const tables = await Table.find({ _id: { $in: tableIds } });
-
-//         if (tables.length !== tableIds.length) {
-//             return res.status(404).json({
-//                 success: false,
-//                 message: "One or more tables not found."
-//             });
-//         }
-
-//         const restaurantId = tables[0].restaurantId.toString();
-
-//         const sameRestaurant = tables.every(
-//             t => t.restaurantId.toString() === restaurantId
-//         );
-
-//         if (!sameRestaurant) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "All tables must belong to the same restaurant."
-//             });
-//         }
-
-//         const roomId = tables[0].roomId?.toString();
-
-//         const sameRoom = tables.every(
-//             t => t.roomId?.toString() === roomId
-//         );
-
-//         if (!sameRoom) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "All tables must belong to the same room."
-//             });
-//         }
-
-//         let finalTableSet = new Set(tableIds.map(id => id.toString()));
-
-//         // include already merged tables
-//         tables.forEach(table => {
-//             if (table.joinedWith && table.joinedWith.length > 0) {
-//                 table.joinedWith.forEach(id =>
-//                     finalTableSet.add(id.toString())
-//                 );
-//             }
-//         });
-
-//         const finalTableIds = Array.from(finalTableSet);
-
-//         await Table.updateMany(
-//             { _id: { $in: finalTableIds } },
-//             {
-//                 $set: {
-//                     isJoined: true,
-//                     joinedWith: finalTableIds
-//                 }
-//             }
-//         );
-
-//         return res.status(200).json({
-//             success: true,
-//             message: "Tables merged successfully.",
-//             data: {
-//                 restaurantId,
-//                 roomId,
-//                 mergedTableIds: finalTableIds
-//             }
-//         });
-
-//     } catch (error) {
-//         console.error("Error merging tables:", error);
-//         return res.status(500).json({
-//             success: false,
-//             message: "Error merging tables.",
-//             error: error.message
-//         });
-//     }
-// };
-
-
 exports.mergeTables = async (req, res) => {
     try {
         const { tableIds } = req.body;
 
-        if (!Array.isArray(tableIds) || tableIds.length !== 2) {
+        /* ================= VALIDATION ================= */
+
+        if (!Array.isArray(tableIds) || tableIds.length < 2) {
+
             return res.status(400).json({
                 success: false,
-                message: "Exactly two tableIds are required to merge."
+                message: "Minimum 2 tables are required to merge."
             });
         }
 
-        const [tableAId, tableBId] = tableIds;
+        // MAX 5 TABLES
+        if (tableIds.length > 5) {
 
-        const tableA = await Table.findById(tableAId);
-        const tableB = await Table.findById(tableBId);
+            return res.status(400).json({
+                success: false,
+                message: "Maximum 5 tables can be merged."
+            });
+        }
 
-        if (!tableA || !tableB) {
+        // UNIQUE IDS
+        const uniqueTableIds = [...new Set(tableIds)];
+
+        if (uniqueTableIds.length !== tableIds.length) {
+
+            return res.status(400).json({
+                success: false,
+                message: "Duplicate tableIds are not allowed."
+            });
+        }
+
+        /* ================= FETCH TABLES ================= */
+
+        const tables = await Table.find({
+            _id: { $in: uniqueTableIds }
+        });
+
+        if (tables.length !== uniqueTableIds.length) {
+
             return res.status(404).json({
                 success: false,
                 message: "One or more tables not found."
             });
         }
 
-        if (tableA.restaurantId.toString() !== tableB.restaurantId.toString()) {
+        /* ================= SAME RESTAURANT ================= */
+
+        const restaurantIds = [
+            ...new Set(
+                tables.map(t => t.restaurantId.toString())
+            )
+        ];
+
+        if (restaurantIds.length > 1) {
+
             return res.status(400).json({
                 success: false,
                 message: "Tables must belong to same restaurant."
             });
         }
 
-        if (tableA.roomId.toString() !== tableB.roomId.toString()) {
+        /* ================= SAME ROOM ================= */
+
+        const roomIds = [
+            ...new Set(
+                tables.map(t => t.roomId.toString())
+            )
+        ];
+
+        if (roomIds.length > 1) {
+
             return res.status(400).json({
                 success: false,
                 message: "Tables must belong to same room."
             });
         }
 
-        let finalSet = new Set();
+        /* ================= VALIDATE TABLE STATUS ================= */
 
-        if (tableA.isJoined && tableA.joinedWith.length > 0) {
-            tableA.joinedWith.forEach(id => finalSet.add(id.toString()));
-        } else {
-            finalSet.add(tableA._id.toString());
+        const invalidTables = tables.filter(
+            t =>
+                t.status === "OutOfService"
+        );
+
+        if (invalidTables.length > 0) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "OutOfService tables cannot be merged."
+            });
         }
 
-        if (tableB.isJoined && tableB.joinedWith.length > 0) {
-            tableB.joinedWith.forEach(id => finalSet.add(id.toString()));
-        } else {
-            finalSet.add(tableB._id.toString());
+        /* ================= BUILD FINAL MERGED GROUP ================= */
+
+        let finalSet = new Set();
+
+        for (const table of tables) {
+
+            // add self
+            finalSet.add(table._id.toString());
+
+            // already merged tables
+            if (
+                table.isJoined &&
+                table.joinedWith?.length
+            ) {
+
+                table.joinedWith.forEach(id => {
+                    finalSet.add(id.toString());
+                });
+            }
         }
 
         const finalTableIds = Array.from(finalSet);
 
+        /* ================= MAX 5 AFTER EXPANSION ================= */
+
+        if (finalTableIds.length > 5) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Merged group cannot exceed 5 tables."
+            });
+        }
+
+        /* ================= UPDATE ALL TABLES ================= */
+
         await Table.updateMany(
-            { _id: { $in: finalTableIds } },
+            {
+                _id: { $in: finalTableIds }
+            },
             {
                 $set: {
                     isJoined: true,
@@ -1103,16 +1095,21 @@ exports.mergeTables = async (req, res) => {
             }
         );
 
+        /* ================= RESPONSE ================= */
+
         return res.status(200).json({
             success: true,
             message: "Tables merged successfully.",
             data: {
-                mergedTableIds: finalTableIds
+                mergedTableIds: finalTableIds,
+                totalTables: finalTableIds.length
             }
         });
 
     } catch (error) {
+
         console.error("Error merging tables:", error);
+
         return res.status(500).json({
             success: false,
             message: "Error merging tables.",
@@ -1266,33 +1263,75 @@ exports.lockTable = async (req, res) => {
     session.startTransaction();
 
     try {
-        const { tableId, reason, force } = req.body;
+
+        const {
+            tableId,
+            reason,
+            force = false,
+            lockType = "day" // "day" | "permanent"
+        } = req.body;
+
         const userId = req.user?._id;
 
+        /* ================= VALIDATION ================= */
+
         if (!tableId) {
+
             await session.abortTransaction();
+
             return res.status(400).json({
                 success: false,
                 message: "tableId is required"
             });
         }
 
+        if (!["day", "permanent"].includes(lockType)) {
+
+            await session.abortTransaction();
+
+            return res.status(400).json({
+                success: false,
+                message: "lockType must be either day or permanent"
+            });
+        }
+
         const table = await Table.findById(tableId).session(session);
 
         if (!table) {
+
             await session.abortTransaction();
+
             return res.status(404).json({
                 success: false,
                 message: "Table not found"
             });
         }
 
+        /* ================= UNLOCK FLOW ================= */
+
         if (table.status === "OutOfService") {
+
+            // permanent unlock restriction
+            if (
+                table.lockType === "permanent" &&
+                req.body.from !== "builder"
+            ) {
+
+                await session.abortTransaction();
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Permanent locked tables can only be unlocked from Builder"
+                });
+            }
 
             table.status = "Available";
             table.lockReason = null;
             table.lockedBy = null;
             table.lockedAt = null;
+            table.lockType = null;
+            table.lockUntilShiftEnd = null;
 
             await table.save({ session });
 
@@ -1306,55 +1345,227 @@ exports.lockTable = async (req, res) => {
             });
         }
 
-        if (["Reserved", "Seated"].includes(table.status) && !force) {
+        /* ================= CANNOT LOCK SEATED ================= */
+
+        if (table.status === "Seated" && !force) {
+
             await session.abortTransaction();
+
             return res.status(400).json({
                 success: false,
-                message: `Table is currently ${table.status}. Use force:true to override.`
+                message:
+                    "Table occupied — clear before locking"
             });
         }
 
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
+        /* ================= FORCE OVERRIDE ================= */
 
-        const todayEnd = new Date();
-        todayEnd.setHours(23, 59, 59, 999);
+        if (table.status === "Reserved" && !force) {
 
-        const todaysBookings = await Reservation.find({
-            tableId: table._id,
-            restaurantId: table.restaurantId,
-            date: { $gte: todayStart, $lte: todayEnd },
-            status: { $in: ["Pending", "Confirmed"] }
-        }).session(session);
+            await session.abortTransaction();
 
-        for (let booking of todaysBookings) {
-            booking.status = "Cancelled";
-            booking.notes = "Cancelled due to table locked";
-            await booking.save({ session });
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Table is currently Reserved. Use force:true to override."
+            });
         }
 
+        /* ================= DAY RANGE ================= */
+
+        const now = new Date();
+
+        const todayStart = new Date(now);
+        todayStart.setHours(0, 0, 0, 0);
+
+        // AC-9
+        // include post-midnight till 04:00 AM next day
+        const tomorrowFourAM = new Date(todayStart);
+        tomorrowFourAM.setDate(tomorrowFourAM.getDate() + 1);
+        tomorrowFourAM.setHours(4, 0, 0, 0);
+
+        /* ================= FIND ACTIVE BOOKINGS ================= */
+
+        const todaysBookings = await Reservation.find({
+            tableIds: table._id,
+            restaurantId: table.restaurantId,
+            date: {
+                $gte: todayStart,
+                $lt: tomorrowFourAM
+            },
+            status: {
+                $in: [
+                    "Pending",
+                    "Confirmed",
+                    "Upcoming"
+                ]
+            }
+        }).session(session);
+
+        /* ================= CANCEL BOOKINGS ================= */
+
+        for (const booking of todaysBookings) {
+
+            booking.status = "Cancelled";
+            booking.cancellation.at = new Date();
+            booking.cancellation.actorId = userId;
+            booking.cancellation.reason = "Cancelled automatically due to table lock";
+            booking.cancellation.source = "table";
+            booking.notes =
+                "Cancelled automatically due to table lock";
+
+            await booking.save({ session });
+
+            const guest = await Guest.findById(
+                booking.guestId
+            );
+
+            // optional email
+            if (guest?.email) {
+                await sendReservationNotification(
+                    booking,
+                    guest,
+                    "Cancelled"
+                );
+            }
+        }
+
+        /* ================= DAY LOCK SHIFT END ================= */
+
+        let lockUntilShiftEnd = null;
+
+        if (lockType === "day") {
+
+            const currentDayMap = [
+                "Su",
+                "Mo",
+                "Tu",
+                "We",
+                "Th",
+                "Fr",
+                "Sa"
+            ];
+
+            const currentDay =
+                currentDayMap[now.getDay()];
+
+            const activeShifts = await Shift.find({
+                restaurantId: table.restaurantId,
+                isActive: true,
+                isExpired: false,
+                daysActive: currentDay
+            }).session(session);
+
+            if (activeShifts.length > 0) {
+
+                let latestShiftEnd = null;
+
+                for (const shift of activeShifts) {
+
+                    if (!shift.endTime) continue;
+
+                    const [hours, minutes] =
+                        shift.endTime.split(":").map(Number);
+
+                    let shiftEnd = new Date(now);
+
+                    shiftEnd.setHours(
+                        hours,
+                        minutes,
+                        0,
+                        0
+                    );
+
+                    // cross midnight shift
+                    if (hours < 4) {
+                        shiftEnd.setDate(
+                            shiftEnd.getDate() + 1
+                        );
+                    }
+
+                    if (
+                        !latestShiftEnd ||
+                        shiftEnd > latestShiftEnd
+                    ) {
+                        latestShiftEnd = shiftEnd;
+                    }
+                }
+
+                lockUntilShiftEnd = latestShiftEnd;
+            }
+        }
+
+        /* ================= LOCK TABLE ================= */
+
         table.status = "OutOfService";
-        table.lockReason = reason || "Temporarily unavailable";
+
+        table.lockReason =
+            reason || "Temporarily unavailable";
+
         table.lockedBy = userId;
+
         table.lockedAt = new Date();
+
+        table.lockType = lockType;
+
+        table.lockUntilShiftEnd =
+            lockType === "day"
+                ? lockUntilShiftEnd
+                : null;
 
         await table.save({ session });
 
+        /* ================= PROPAGATE TO MERGED TABLES ================= */
+
+        if (
+            table.isJoined &&
+            table.joinedWith?.length > 0
+        ) {
+
+            await Table.updateMany(
+                {
+                    _id: {
+                        $in: table.joinedWith
+                    }
+                },
+                {
+                    $set: {
+                        status: "OutOfService",
+                        lockReason:
+                            table.lockReason,
+                        lockedBy: userId,
+                        lockedAt: table.lockedAt,
+                        lockType,
+                        lockUntilShiftEnd
+                    }
+                },
+                { session }
+            );
+        }
+
         await session.commitTransaction();
+
         session.endSession();
 
         return res.status(200).json({
             success: true,
-            message: "Table locked successfully",
+            message: `Table locked successfully`,
             data: {
                 tableId: table._id,
-                cancelledBookings: todaysBookings.length
+                lockType,
+                lockUntilShiftEnd,
+                cancelledBookings:
+                    todaysBookings.length
             }
         });
 
     } catch (error) {
+
         await session.abortTransaction();
+
         session.endSession();
+
+        console.error("lockTable error:", error);
 
         return res.status(500).json({
             success: false,
@@ -1739,7 +1950,14 @@ exports.changeTableAssignment = async (req, res) => {
     const session = await mongoose.startSession();
 
     try {
-        const { reservationId, newTableId, force = false } = req.body;
+
+        const {
+            reservationId,
+            newTableId,
+            force = false
+        } = req.body;
+
+        /* ================= VALIDATION ================= */
 
         if (!reservationId || !newTableId) {
             return res.status(400).json({
@@ -1750,77 +1968,174 @@ exports.changeTableAssignment = async (req, res) => {
 
         session.startTransaction();
 
-        const reservation = await Reservation.findById(reservationId).session(session);
+        /* ================= RESERVATION ================= */
+
+        const reservation = await Reservation.findById(reservationId)
+            .session(session);
 
         if (!reservation) {
             throw new Error("Reservation not found.");
         }
 
-        const reservationDate = reservation.date;
+        const reservationDate = new Date(reservation.date);
 
-        const newTable = await Table.findById(newTableId).session(session);
+        /* ================= NEW TABLE ================= */
+
+        const newTable = await Table.findById(newTableId)
+            .session(session);
 
         if (!newTable) {
             throw new Error("New table not found.");
         }
 
-        if (newTable.status === "OutOfService" && !force) {
+        /* ================= SAME TABLE CHECK ================= */
+
+        const currentTableIds =
+            reservation.tableIds?.map(id => id.toString()) || [];
+
+        if (currentTableIds.includes(newTableId.toString())) {
+            throw new Error("Reservation is already assigned to this table.");
+        }
+
+        /* ================= LOCK CHECK ================= */
+
+        if (
+            newTable.status === "OutOfService" &&
+            !force
+        ) {
             throw new Error("Selected table is locked.");
         }
+
+        /* ================= BLOCK CHECK ================= */
 
         const conflictingBlock = await Block.findOne({
             restaurantId: reservation.restaurantId,
             isActive: true,
             status: "Active",
             isExpired: false,
-            startDate: { $lte: reservationDate },
-            endDate: { $gte: reservationDate },
+
+            startDate: {
+                $lte: reservationDate
+            },
+
+            endDate: {
+                $gte: reservationDate
+            },
+
             $or: [
                 { isFullRestaurantBlock: true },
-                { tableIds: newTableId },
-                reservation.shiftId ? { shiftIds: reservation.shiftId } : {}
-            ]
+                { tableIds: newTable._id },
+                reservation.shiftId
+                    ? { shiftIds: reservation.shiftId }
+                    : null
+            ].filter(Boolean)
+
         }).session(session);
 
         if (conflictingBlock && !force) {
+
             throw new Error(
-                `Table is blocked: ${conflictingBlock.reason}`
+                `Table is blocked: ${conflictingBlock.reason || "Blocked"}`
             );
         }
+
+        /* ================= TIME OVERLAP CHECK ================= */
 
         const conflictingReservation = await Reservation.findOne({
+
             _id: { $ne: reservationId },
-            tableId: newTableId,
+
+            tableIds: newTable._id,
+
             date: reservation.date,
-            time: reservation.time,
-            status: { $in: ["Pending", "Confirmed", "Seated"] }
+
+            status: {
+                $in: [
+                    "Pending",
+                    "Confirmed",
+                    "Seated",
+                    "Upcoming"
+                ]
+            }
+
         }).session(session);
 
-        if (conflictingReservation && !force) {
-            throw new Error("Selected table already assigned.");
+        if (conflictingReservation) {
+
+            const existingStart = conflictingReservation.time;
+            const existingEnd =
+                conflictingReservation.endTime ||
+                conflictingReservation.expectedEndTime;
+
+            const currentStart = reservation.time;
+            const currentEnd =
+                reservation.endTime ||
+                reservation.expectedEndTime;
+
+            const hasOverlap =
+                currentStart < existingEnd &&
+                currentEnd > existingStart;
+
+            if (hasOverlap && !force) {
+
+                throw new Error(
+                    "Selected table is already assigned for this time slot."
+                );
+            }
         }
 
-        const oldTableId = reservation.tableId;
+        /* ================= OLD TABLES ================= */
 
-        reservation.tableId = newTableId;
+        const oldTableIds = reservation.tableIds || [];
+
+        /* ================= UPDATE RESERVATION ================= */
+
+        reservation.tableIds = [newTable._id];
+
+        // backward compatibility
+        reservation.tableId = newTable._id;
+
         await reservation.save({ session });
 
-        if (oldTableId) {
-            await Table.findByIdAndUpdate(
-                oldTableId,
-                { status: "Available" },
-                { session }
+        /* ================= FREE OLD TABLES ================= */
+
+        if (oldTableIds.length > 0) {
+
+            await Table.updateMany(
+                {
+                    _id: {
+                        $in: oldTableIds
+                    }
+                },
+                {
+                    $set: {
+                        status: "Available"
+                    }
+                },
+                {
+                    session
+                }
             );
         }
 
-        const newStatus =
-            reservation.status === "Seated" ? "Seated" : "Reserved";
+        /* ================= UPDATE NEW TABLE STATUS ================= */
+
+        const tableStatus =
+            reservation.status === "Seated"
+                ? "Seated"
+                : "Reserved";
 
         await Table.findByIdAndUpdate(
-            newTableId,
-            { status: newStatus },
+            newTable._id,
+            {
+                $set: {
+                    status: tableStatus
+                }
+            },
             { session }
         );
+
+        /* ================= COMMIT ================= */
 
         await session.commitTransaction();
         session.endSession();
@@ -1829,10 +2144,10 @@ exports.changeTableAssignment = async (req, res) => {
             success: true,
             message: "Table assignment changed successfully.",
             data: {
-                reservationId,
-                oldTableId,
-                newTableId,
-                tableStatus: newStatus
+                reservationId: reservation._id,
+                oldTableIds,
+                newTableId: newTable._id,
+                tableStatus
             }
         });
 

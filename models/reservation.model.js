@@ -11,10 +11,10 @@ const reservationSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "Guest",
     },
-    tableId: {
+    tableIds: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: "Table"
-    },
+    }],
     shiftId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Shift"
@@ -43,7 +43,7 @@ const reservationSchema = new mongoose.Schema({
     },
     source: {
         type: String,
-        enum: ["Online", "Walk-in", "Phone", "Email-Message", "Remi"],
+        enum: ["Online", "Walk-in", "Phone", "Email-Message", "Remi", "shared_link"],
         default: "Phone"
     },
     tags: [
@@ -53,7 +53,8 @@ const reservationSchema = new mongoose.Schema({
         }
     ],
     seating: {
-        type: String
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "SeatingPreference"
     },
 
     isConfirmedPolicy: {

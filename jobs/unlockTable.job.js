@@ -1,42 +1,100 @@
 const cron = require("node-cron");
-const moment = require("moment");
 
 const Table = require("../models/table.model");
 
-cron.schedule("0 2 * * *", async () => {
-    console.log("Running auto-unlock job...");
+/*
+|--------------------------------------------------------------------------
+| AUTO UNLOCK DAY-LOCK TABLES
+|--------------------------------------------------------------------------
+| Runs every 5 minutes
+| Unlocks only day-locked tables
+| Works globally for all countries/timezones
+|--------------------------------------------------------------------------
+|
+| IMPORTANT:
+| lockUntilShiftEnd must be stored in UTC Date format
+| while creating the lock.
+|
+*/
+
+cron.schedule("*/5 * * * *", async () => {
 
     try {
 
-        const todayStart = moment().startOf("day");
+        const now = new Date();
 
-        const tablesToUnlock = await Table.find({
+        /* ================= FIND EXPIRED DAY LOCKS ================= */
+
+        const expiredTables = await Table.find({
             status: "OutOfService",
-            lockedAt: { $lt: todayStart.toDate() }
-        }).select("_id");
 
-        if (!tablesToUnlock.length) return;
+            lockType: "day",
 
-        const tableIds = tablesToUnlock.map(t => t._id);
+            lockUntilShiftEnd: {
+                $lte: now
+            }
+        }).select("_id joinedWith");
+
+        if (!expiredTables.length) {
+
+            // console.log("No expired locked tables found");
+            return;
+        }
+
+        /* ================= HANDLE MERGED TABLES ================= */
+
+        const allTableIds = new Set();
+
+        expiredTables.forEach(table => {
+
+            allTableIds.add(table._id.toString());
+
+            if (
+                table.joinedWith &&
+                table.joinedWith.length
+            ) {
+
+                table.joinedWith.forEach(id => {
+                    allTableIds.add(id.toString());
+                });
+            }
+        });
+
+        const tableIds = Array.from(allTableIds);
+
+        /* ================= AUTO UNLOCK ================= */
 
         await Table.updateMany(
-            { _id: { $in: tableIds } },
             {
-                $set: { status: "Available" },
+                _id: {
+                    $in: tableIds
+                }
+            },
+            {
+                $set: {
+                    status: "Available"
+                },
+
                 $unset: {
                     lockReason: "",
                     lockedBy: "",
-                    lockedAt: ""
+                    lockedAt: "",
+                    lockType: "",
+                    lockUntilShiftEnd: ""
                 }
             }
         );
 
-        console.log(`Auto unlocked ${tableIds.length} table(s)`);
+        console.log(
+            `Auto unlocked ${tableIds.length} table(s)`
+        );
 
     } catch (error) {
-        console.error("Auto unlock error:", error);
+
+        console.error(
+            "AUTO UNLOCK ERROR:",
+            error
+        );
     }
 
-}, {
-    timezone: "Asia/Kolkata"
 });

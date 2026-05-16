@@ -85,6 +85,7 @@ router.post("/addPreference", seatingPreference.addSeatingPreference);
 router.delete("/deletePreference", seatingPreference.deleteSeatingPreference);
 router.post("/togglePreferenceStatus", seatingPreference.toggleSeatingPreferenceStatus);
 router.post("/getAllPreference", seatingPreference.getAllPreference);
+router.post("/getAvailableTablesByPreference", seatingPreference.getAvailableTablesByPreference);
 
 router.post("/addStaff", seatingPreference.saveStaffAccount);
 router.delete("/deleteStaff", seatingPreference.deleteStaff);

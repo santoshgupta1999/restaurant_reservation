@@ -7,7 +7,6 @@ const sendMail = require('../utils/mailer.js');
 const path = require('path');
 const fs = require('fs');
 const mongoose = require('mongoose');
-const BlacklistToken = require("../models/blacklistToken.model");
 const crypto = require("crypto");
 const { formatDateTime } = require("../utils/dateFormatter");
 const RolePermission = require("../models/rolePermission.model.js");

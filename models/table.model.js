@@ -114,6 +114,17 @@ const tableSchema = new mongoose.Schema(
             type: Date,
             default: null
         },
+
+        lockType: {
+            type: String,
+            enum: ["day", "permanent"],
+            default: null
+        },
+
+        lockUntilShiftEnd: {
+            type: Date,
+            default: null
+        },
     },
     { timestamps: true }
 );

@@ -37,7 +37,7 @@ cron.schedule("*/5 * * * *", async () => {
                 timezone
             );
 
-            // 3 HOURS BEFORE
+            // 2 HOURS BEFORE
             const upcomingTime = bookingDateTime
                 .clone()
                 .subtract(2, "hours");

@@ -44,7 +44,7 @@ exports.createGuest = async (req, res) => {
             notes,
             tags,
             jobTitle,
-            preffered,
+            preferred,
             company
         } = req.body;
 
@@ -95,7 +95,7 @@ exports.createGuest = async (req, res) => {
             notes,
             tags,
             jobTitle,
-            preffered,
+            preferred,
             company
         });
 
@@ -459,7 +459,7 @@ exports.updateGuest = async (req, res) => {
             "notes",
             "tags",
             "jobTitle",
-            "preffered",
+            "preferred",
             "company",
             "isActive"
         ];
@@ -779,7 +779,7 @@ exports.editGuest = async (req, res) => {
             tags,
             jobTitle,
             company,
-            preffered,
+            preferred,
             marketingOptIn,
 
             isActive
@@ -831,7 +831,7 @@ exports.editGuest = async (req, res) => {
 
         if (jobTitle !== undefined) guest.jobTitle = jobTitle;
         if (company !== undefined) guest.company = company;
-        if (preffered !== undefined) guest.preffered = preffered;
+        if (preferred !== undefined) guest.preferred = preferred;
 
         if (marketingOptIn !== undefined) guest.marketingOptIn = marketingOptIn;
 

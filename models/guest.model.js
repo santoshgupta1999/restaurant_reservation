@@ -72,7 +72,7 @@ const guestSchema = new mongoose.Schema(
         jobTitle: { type: String },
         company: { type: String },
 
-        preffered: { type: String },
+        preferred: { type: String },
 
         totalVisits: { type: Number, default: 0 },
         lastVisitAt: { type: Date },

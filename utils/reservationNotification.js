@@ -2,6 +2,7 @@
 const sendMail = require("../utils/mailer");
 const renderTemplate = require("../utils/renderTemplate");
 const Restaurant = require("../models/Restaurant.model");
+const Table = require("../models/table.model");
 
 const TYPES = {
     CONFIRMED: "Confirmed",
@@ -45,6 +46,35 @@ const sendReservationNotification = async (reservation, guest, type) => {
     const restaurant = await Restaurant.findById(reservation.restaurantId).lean();
     const restaurantPhone = `${restaurant?.countryCode || ""}${restaurant?.phone || ""}`;
     const city = restaurant?.city || "";
+
+    let tableNumbers = "-";
+
+    let floorNames = "-";
+
+    if (reservation.tableIds?.length) {
+
+        const tables = await Table.find({
+            _id: { $in: reservation.tableIds }
+        })
+            .populate("roomId", "name")
+            .select("tableNumber roomId")
+            .lean();
+
+        if (tables.length) {
+
+            tableNumbers = tables
+                .map(table => table.tableNumber)
+                .join(", ");
+
+            floorNames = [
+                ...new Set(
+                    tables
+                        .map(table => table.roomId?.name)
+                        .filter(Boolean)
+                )
+            ].join(", ");
+        }
+    }
     // CONFIRMED FLOW
     if (type === TYPES.CONFIRMED) {
 
@@ -169,6 +199,8 @@ const sendReservationNotification = async (reservation, guest, type) => {
             restaurantPhone,
             city,
             restaurantAddress: restaurant.restaurantAddress,
+            tableNumbers,
+            floorNames
         });
 
         text = `
@@ -179,6 +211,9 @@ const sendReservationNotification = async (reservation, guest, type) => {
     Date: ${formattedDate}
     Time: ${convertTo12Hour(reservation.time)}
     Guests: ${reservation.partySize}
+
+    Table Number: ${tableNumbers}
+    Floor: ${floorNames}
 
     Restaurant Name: ${restaurant.venueName}
     Restaurant Phone: ${restaurantPhone}

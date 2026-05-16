@@ -54,10 +54,13 @@ const SeatingPreferenceSchema = new mongoose.Schema(
             required: true
         },
 
-        tableAssignment: {
-            type: [String],
-            required: true
-        },
+        tableIds: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "Table",
+                required: true
+            }
+        ],
 
         status: {
             type: String,
@@ -80,6 +83,16 @@ SeatingPreferenceSchema.index(
     }
 );
 
+SeatingPreferenceSchema.index({
+    restaurantId: 1,
+    status: 1
+});
+
+SeatingPreferenceSchema.index({
+    restaurantId: 1,
+    activeDays: 1
+});
+
 /* ================== VALIDATIONS ================== */
 
 // startDate < endDate
@@ -92,15 +105,26 @@ SeatingPreferenceSchema.pre("save", function (next) {
     next();
 });
 
-// // firstBookingTime < lastBookingTime
-// SeatingPreferenceSchema.pre("save", function (next) {
-//     if (this.firstBookingTime >= this.lastBookingTime) {
-//         return next(
-//             new Error("First booking time must be earlier than last booking time")
-//         );
-//     }
-//     next();
-// });
+SeatingPreferenceSchema.pre("save", function (next) {
+
+    const toMinutes = (time) => {
+        const [h, m] = time.split(":").map(Number);
+        return h * 60 + m;
+    };
+
+    const first = toMinutes(this.firstBookingTime);
+    const last = toMinutes(this.lastBookingTime);
+
+    if (first >= last) {
+        return next(
+            new Error(
+                "First booking time must be earlier than last booking time"
+            )
+        );
+    }
+
+    next();
+});
 
 module.exports = mongoose.model(
     "SeatingPreference",

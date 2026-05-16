@@ -5,17 +5,13 @@ const User = require('../models/user.model');
 const Guest = require('../models/guest.model');
 const Block = require('../models/block.model');
 const Restaurant = require('../models/Restaurant.model');
+const ReservationHold = require("../models/reservationHold.model");
 const mongoose = require('mongoose');
 // const sendSMS = require('../utils/sendSMS'); // <-- optional SMS helper
 const sendEmail = require('../utils/mailer'); // <-- optional Email helper
 const { sendReservationNotification } = require("../utils/reservationNotification");
 const { formatDate, formatDateTime, formatTime } = require('../utils/dateFormatter');
 
-// const getDayOfWeek = (dateString) => {
-//     const date = new Date(dateString);
-//     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-//     return days[date.getDay()];
-// };
 
 function convertTo24Hour(time) {
 
@@ -58,7 +54,7 @@ exports.createReservation = async (req, res) => {
         const {
             reservationId,
             restaurantId,
-            tableId,
+            tableIds = [],
 
             firstName,
             lastName,
@@ -100,7 +96,7 @@ exports.createReservation = async (req, res) => {
             });
         }
 
-        const allowedSources = ["Online", "Walk-in", "Phone", "Email-Message", "Remi"];
+        const allowedSources = ["shared_link", "Walk-in", "Phone", "Email-Message", "Remi"];
 
         if (source && !allowedSources.includes(source)) {
             return res.status(400).json({
@@ -191,17 +187,17 @@ exports.createReservation = async (req, res) => {
 
         /* ================= TABLE VALIDATION ================= */
 
-        if (tableId) {
-            const table = await Table.findById(tableId);
+        if (tableIds && tableIds.length > 0) {
+            const tables = await Table.find({ _id: { $in: tableIds } });
 
-            if (table?.status === "OutOfService") {
+            if (tables.some(table => table.status === "OutOfService")) {
                 return res.status(400).json({
                     success: false,
-                    message: "This table is currently locked (Out of Service)."
+                    message: "One or more selected tables are currently locked (Out of Service)."
                 });
             }
 
-            if (table && partySize > table.capacity) {
+            if (tables.some(table => partySize > table.capacity)) {
                 return res.status(400).json({
                     success: false,
                     message: "Party size exceeds table capacity."
@@ -210,7 +206,7 @@ exports.createReservation = async (req, res) => {
 
             const existingBooking = await Reservation.findOne({
                 restaurantId,
-                tableId,
+                tableIds: { $in: tableIds },
                 date: reservationDate,
                 time,
                 status: { $in: ["Pending", "Confirmed", "Upcoming", "Seated"] },
@@ -220,7 +216,7 @@ exports.createReservation = async (req, res) => {
             if (existingBooking) {
                 return res.status(400).json({
                     success: false,
-                    message: "This table is already booked for selected Date & Time."
+                    message: "One or more selected tables are already booked for the selected Date & Time."
                 });
             }
         }
@@ -281,7 +277,7 @@ exports.createReservation = async (req, res) => {
                 existingReservation.date.toISOString() !== reservationDate.toISOString() ||
                 existingReservation.time !== formattedTime ||
                 existingReservation.partySize !== partySize ||
-                String(existingReservation.tableId) !== String(tableId) ||
+                String(existingReservation.tableIds) !== String(tableIds) ||
                 existingReservation.seating !== seating ||
                 existingReservation.source !== source
             ) {
@@ -299,7 +295,7 @@ exports.createReservation = async (req, res) => {
                 statusChanged = true;
             }
 
-            existingReservation.tableId = tableId || existingReservation.tableId;
+            existingReservation.tableIds = tableIds || existingReservation.tableIds;
             existingReservation.shiftId = shift?._id || null;
             existingReservation.date = reservationDate;
             existingReservation.time = formattedTime;
@@ -318,7 +314,7 @@ exports.createReservation = async (req, res) => {
             reservation = await Reservation.create({
                 restaurantId,
                 guestId: guest._id,
-                tableId: tableId || null, // table optional
+                tableIds: tableIds || [], // table optional
                 shiftId: shift?._id || null, // shift optional
                 date: reservationDate,
                 time: formattedTime,
@@ -493,7 +489,7 @@ exports.getReservations = async (req, res) => {
                 `
             })
             .populate({
-                path: "tableId",
+                path: "tableIds",
                 select: "tableNumber roomId capacity",
                 populate: {
                     path: "roomId",
@@ -503,6 +499,10 @@ exports.getReservations = async (req, res) => {
             .populate({
                 path: "shiftId",
                 select: "name startTime endTime type"
+            })
+            .populate({
+                path: "seating",
+                select: "preferenceName"
             })
             .sort({ date: 1, time: 1 });
 
@@ -1120,7 +1120,7 @@ exports.createWidgetReservation = async (req, res) => {
 
         const {
             reservationId,
-            tableId,
+            tableIds = [],
             firstName,
             lastName,
             guestEmail,
@@ -1131,7 +1131,7 @@ exports.createWidgetReservation = async (req, res) => {
             date,
             time,
             partySize,
-            source = "Online",
+            source = "shared_link",
             status,
             seating,
             tags,
@@ -1146,7 +1146,7 @@ exports.createWidgetReservation = async (req, res) => {
             });
         }
 
-        const allowedSources = ["Online", "Walk-in", "Phone", "Email-Message", "Remi"];
+        const allowedSources = ["shared_link", "Walk-in", "Phone", "Email-Message", "Remi"];
 
         if (source && !allowedSources.includes(source)) {
             await session.abortTransaction();
@@ -1240,17 +1240,17 @@ exports.createWidgetReservation = async (req, res) => {
 
         /* ================= TABLE VALIDATION ================= */
 
-        if (tableId) {
-            const table = await Table.findById(tableId);
+        if (tableIds && tableIds.length > 0) {
+            const tables = await Table.find({ _id: { $in: tableIds } });
 
-            if (table?.status === "OutOfService") {
+            if (tables.some(table => table.status === "OutOfService")) {
                 return res.status(400).json({
                     success: false,
-                    message: "This table is currently locked (Out of Service)."
+                    message: "One or more selected tables are currently locked (Out of Service)."
                 });
             }
 
-            if (table && partySize > table.capacity) {
+            if (tables.some(table => partySize > table.capacity)) {
                 return res.status(400).json({
                     success: false,
                     message: "Party size exceeds table capacity."
@@ -1260,10 +1260,10 @@ exports.createWidgetReservation = async (req, res) => {
 
         /* ================= DUPLICATE BOOKING ================= */
 
-        if (tableId) {
+        if (tableIds && tableIds.length > 0) {
             const existingBooking = await Reservation.findOne({
                 restaurantId,
-                tableId,
+                tableIds: { $in: tableIds },
                 date: reservationDate,
                 time: formattedTime,
                 status: { $in: ["Pending", "Confirmed", "Seated"] },
@@ -1273,7 +1273,7 @@ exports.createWidgetReservation = async (req, res) => {
             if (existingBooking) {
                 return res.status(400).json({
                     success: false,
-                    message: "This table is already booked."
+                    message: "One or more selected tables are already booked."
                 });
             }
         }
@@ -1329,7 +1329,7 @@ exports.createWidgetReservation = async (req, res) => {
                 existingReservation.date.toISOString() !== reservationDate.toISOString() ||
                 existingReservation.time !== formattedTime ||
                 existingReservation.partySize !== partySize ||
-                String(existingReservation.tableId) !== String(tableId) ||
+                existingReservation.tableIds.toString() !== (tableIds || []).toString() ||
                 existingReservation.seating !== seating ||
                 existingReservation.source !== source
             ) {
@@ -1347,7 +1347,7 @@ exports.createWidgetReservation = async (req, res) => {
                 statusChanged = true;
             }
             // UPDATE
-            if (tableId) existingReservation.tableId = tableId;
+            if (tableIds) existingReservation.tableIds = tableIds;
 
             if (date) existingReservation.date = reservationDate;
 
@@ -1376,7 +1376,7 @@ exports.createWidgetReservation = async (req, res) => {
             reservation = await Reservation.create({
                 restaurantId,
                 guestId: guest._id,
-                tableId,
+                tableIds: tableIds || [],
                 shiftId: shift._id,
                 date: reservationDate,
                 time: formattedTime,
@@ -1469,7 +1469,10 @@ exports.getReservationConfirmation = async (req, res) => {
         const reservation = await Reservation.findById(reservationId)
             .populate("guestId")
             .populate("restaurantId")
-            .populate("tableId");
+            .populate(
+                "tableIds",
+                "tableNumber capacity"
+            );
 
         if (!reservation) {
             return res.status(404).json({
@@ -1514,9 +1517,11 @@ exports.getReservationConfirmation = async (req, res) => {
                 logo: logoUrl
             },
 
-            table: {
-                tableNumber: reservation.tableId?.tableNumber
-            },
+            table: reservation.tableIds?.map(table => ({
+                id: table._id,
+                tableNumber: table.tableNumber,
+                capacity: table.capacity
+            })),
 
             // shareLink: `https://remi.com/${restaurant?.slug || "restaurant"}`,
 
@@ -1540,6 +1545,138 @@ exports.getReservationConfirmation = async (req, res) => {
             success: false,
             message: "Server error",
             error: error.message
+        });
+    }
+};
+
+exports.createReservationHold = async (req, res) => {
+
+    try {
+
+        const { restaurantId } = req.params;
+
+        const {
+            tableIds,
+            date,
+            time
+        } = req.body;
+
+        /* ================= VALIDATION ================= */
+
+        if (
+            !restaurantId ||
+            !tableIds ||
+            !tableIds.length ||
+            !date ||
+            !time
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "restaurantId, tableIds, date and time are required"
+            });
+        }
+
+        // SINGLE TABLE ONLY
+        if (tableIds.length > 1) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Currently only single table booking is allowed"
+            });
+        }
+
+        /* ================= CHECK ACTIVE HOLD ================= */
+
+        const existingHold =
+            await ReservationHold.findOne({
+                tableIds: {
+                    $in: tableIds
+                },
+                date,
+                time,
+                expiresAt: {
+                    $gt: new Date()
+                }
+            });
+
+        if (existingHold) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Table is temporarily locked by another guest for the selected date and time"
+            });
+        }
+
+        /* ================= CHECK REAL RESERVATION ================= */
+
+        const existingReservation =
+            await Reservation.findOne({
+
+                tableIds: {
+                    $in: tableIds
+                },
+
+                date,
+                time,
+
+                status: {
+                    $nin: [
+                        "Cancelled",
+                        "Finished",
+                        "No-Show"
+                    ]
+                }
+            });
+
+        if (existingReservation) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Table already booked for the selected date and time"
+            });
+        }
+
+        /* ================= CREATE HOLD ================= */
+
+        const hold =
+            await ReservationHold.create({
+
+                restaurantId,
+
+                tableIds,
+
+                date,
+
+                time,
+
+                expiresAt: new Date(
+                    Date.now() + 150 * 1000
+                ) // 150 seconds
+            });
+
+        return res.status(201).json({
+            success: true,
+            message:
+                "Table locked successfully",
+
+            expiresIn: 150,
+
+            holdId: hold._id
+        });
+
+    } catch (error) {
+
+        console.error(
+            "createReservationHold error:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            message:
+                error.message ||
+                "Internal server error"
         });
     }
 };

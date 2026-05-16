@@ -51,6 +51,6 @@ exports.reservationValidator = [
     body("source")
         .notEmpty()
         .withMessage("Source is required.")
-        .isIn(["Online", "Walk-in", "Phone", "Email-Message", "Remi"])
-        .withMessage("Source name must be one of: Online, Walk-in, Phone, Email-Message, Remi."),
+        .isIn(["shared_link", "Walk-in", "Phone", "Email-Message", "Remi"])
+        .withMessage("Source name must be one of: shared_link, Walk-in, Phone, Email-Message, Remi."),
 ];

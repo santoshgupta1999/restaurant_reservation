@@ -28,7 +28,7 @@ exports.registerValidator = [
 
     body("role")
         .optional()
-        .isIn(["admin", "host", "marketer", "manager"])
+        .isIn(["admin", "Host", "Call Center", "Manager"])
         .withMessage("Invalid role provided."),
 
     body("restaurantId")

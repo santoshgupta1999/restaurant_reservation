@@ -30,14 +30,7 @@ router.post('/cancelled/:id', reservController.cancelReservation);
 
 router.post('/widget-booking/:restaurantId', reservController.createWidgetReservation);
 router.get('/confirmation/:reservationId', reservController.getReservationConfirmation);
+router.post('/create-hold/:restaurantId', reservController.createReservationHold);
 
-// router.post("/getDashboardOverview", reservController.dashboardSummary)
-// router.post("/bookingStats", reservController.bookingStats)
-// router.post("/bookingTrend24h", reservController.bookingTrend24h)
-// router.post("/mostActiveVenues", reservController.mostActiveVenues)
-// router.post("/getRemiUsers", reservController.getRemiUsers)
-// router.post("/getNoShowRiskVenues", reservController.getNoShowRiskVenues)
-// router.post("/getReservationList", reservController.getReservationList)
-// router.post("/getMonthlyGraph", verifyToken, reservController.getMonthlyGraph)
 
 module.exports = router;

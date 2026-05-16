@@ -2,6 +2,9 @@ const SeatingPreference = require("../models/SeatingPreference");
 const StaffAccount = require("../models/staffAccount");
 const Room = require('../models/room.model');
 const bcrypt = require("bcrypt");
+const mongoose = require("mongoose");
+const Table = require("../models/table.model");
+const Reservation = require("../models/reservation.model");
 const moment = require("moment");
 const {
     formatDate,
@@ -82,7 +85,7 @@ const {
 exports.addSeatingPreference = async (req, res) => {
     try {
         const {
-            id, // optional
+            id,
             preferenceName,
             restaurantId,
             startDate,
@@ -90,21 +93,21 @@ exports.addSeatingPreference = async (req, res) => {
             activeDays,
             firstBookingTime,
             lastBookingTime,
-            tableAssignment,
+            tableIds,
             status,
-            indefinite // new boolean flag
+            indefinite
         } = req.body || {};
 
         /* ================= BASIC VALIDATION ================= */
+
         if (
             !preferenceName ||
             !restaurantId ||
             !startDate ||
-            (!indefinite && !endDate) || // only require endDate if NOT indefinite
             !activeDays ||
             !firstBookingTime ||
             !lastBookingTime ||
-            !tableAssignment
+            !tableIds
         ) {
             return res.status(400).json({
                 success: false,
@@ -112,114 +115,277 @@ exports.addSeatingPreference = async (req, res) => {
             });
         }
 
-        if (!Array.isArray(activeDays) || activeDays.length === 0) {
+        if (
+            !Array.isArray(activeDays) ||
+            activeDays.length === 0
+        ) {
             return res.status(400).json({
                 success: false,
-                message: "Please select at least one active day"
+                message:
+                    "Please select at least one active day"
             });
         }
 
-        if (!Array.isArray(tableAssignment) || tableAssignment.length === 0) {
+        /* ================= TABLE IDS VALIDATION ================= */
+
+        if (
+            !Array.isArray(tableIds) ||
+            tableIds.length === 0
+        ) {
             return res.status(400).json({
                 success: false,
-                message: "Please select at least one table assignment"
+                message:
+                    "Please select at least one table"
             });
         }
 
-        if (new Date(startDate) > new Date(endDate)) {
+        // validate object ids
+        const invalidTableIds = tableIds.filter(
+            (tableId) =>
+                !mongoose.Types.ObjectId.isValid(
+                    tableId
+                )
+        );
+
+        if (invalidTableIds.length) {
             return res.status(400).json({
                 success: false,
-                message: "Start date cannot be greater than end date"
+                message:
+                    "Invalid tableIds found"
             });
         }
+
+        // remove duplicate ids
+        const uniqueTableIds = [
+            ...new Set(
+                tableIds.map((id) =>
+                    id.toString()
+                )
+            )
+        ];
+
+        // validate tables exist
+        const tables = await Table.find({
+            _id: { $in: uniqueTableIds },
+            restaurantId
+        }).select("_id");
+
+        if (
+            tables.length !==
+            uniqueTableIds.length
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Some selected tables do not exist"
+            });
+        }
+
+        /* ================= DATE VALIDATION ================= */
 
         if (!indefinite && !endDate) {
+
             return res.status(400).json({
                 success: false,
-                message: "End date is required for non-indefinite shifts"
+                message:
+                    "End date is required for non-indefinite preference"
             });
         }
 
         if (indefinite && endDate) {
+
             return res.status(400).json({
                 success: false,
-                message: "please select one End date or non-indefinite shifts"
+                message:
+                    "Please select either endDate or indefinite"
             });
         }
+
+        if (
+            !indefinite &&
+            new Date(startDate) > new Date(endDate)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Start date cannot be greater than end date"
+            });
+        }
+
+        /* ================= TIME VALIDATION ================= */
+
+        const toMinutes = (time) => {
+
+            const [h, m] = time
+                .split(":")
+                .map(Number);
+
+            return (h * 60) + m;
+        };
+
+        const first =
+            toMinutes(firstBookingTime);
+
+        const last =
+            toMinutes(lastBookingTime);
+
+        // SAME TIME NOT ALLOWED
+        if (first === last) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "First booking time and last booking time cannot be same"
+            });
+        }
+
+        /*
+            CROSS MIDNIGHT SUPPORT
+
+            VALID:
+            18:00 -> 02:00
+        */
+
+        /* ================= DUPLICATE NAME CHECK ================= */
 
         const duplicateQuery = {
             restaurantId,
-            preferenceName: preferenceName.trim()
+            preferenceName:
+                preferenceName.trim()
         };
 
         if (id) {
-            duplicateQuery._id = { $ne: id };
+            duplicateQuery._id = {
+                $ne: id
+            };
         }
 
-        const existing = await SeatingPreference.findOne(duplicateQuery);
+        const existing =
+            await SeatingPreference.findOne(
+                duplicateQuery
+            );
 
         if (existing) {
+
             return res.status(400).json({
                 success: false,
-                message: "Preference name already exists."
+                message:
+                    "Preference name already exists"
             });
         }
 
-        /* ================= UPDATE (ID EXISTS) ================= */
+        /* ================= UPDATE ================= */
+
         if (id) {
-            const existingPreference = await SeatingPreference.findById(id);
+
+            const existingPreference =
+                await SeatingPreference.findById(id);
 
             if (!existingPreference) {
+
                 return res.status(404).json({
                     success: false,
-                    message: "Seating preference not found"
+                    message:
+                        "Seating preference not found"
                 });
             }
 
-            existingPreference.preferenceName = preferenceName.trim();
-            existingPreference.restaurantId = restaurantId;
-            existingPreference.startDate = startDate;
-            existingPreference.endDate = indefinite ? null : endDate; // null for indefinite
-            existingPreference.indefinite = indefinite ? true : false; // null for indefinite
-            existingPreference.activeDays = activeDays;
-            existingPreference.firstBookingTime = firstBookingTime;
-            existingPreference.lastBookingTime = lastBookingTime;
-            existingPreference.tableAssignment = tableAssignment;
-            existingPreference.status = status || existingPreference.status;
+            existingPreference.preferenceName =
+                preferenceName.trim();
+
+            existingPreference.restaurantId =
+                restaurantId;
+
+            existingPreference.startDate =
+                startDate;
+
+            existingPreference.endDate =
+                indefinite
+                    ? null
+                    : endDate;
+
+            existingPreference.indefinite =
+                !!indefinite;
+
+            existingPreference.activeDays =
+                activeDays;
+
+            existingPreference.firstBookingTime =
+                firstBookingTime;
+
+            existingPreference.lastBookingTime =
+                lastBookingTime;
+
+            // FIXED TABLE IDS
+            existingPreference.tableIds =
+                uniqueTableIds;
+
+            existingPreference.status =
+                status ||
+                existingPreference.status;
 
             await existingPreference.save();
 
             return res.status(200).json({
                 success: true,
-                message: "Seating preference updated successfully",
+                message:
+                    "Seating preference updated successfully",
                 data: existingPreference
             });
         }
 
-        /* ================= CREATE (NO ID) ================= */
-        const newPreference = await SeatingPreference.create({
-            preferenceName: preferenceName.trim(),
-            restaurantId,
-            startDate,
-            endDate: indefinite ? null : endDate, // null if indefinite
-            indefinite: indefinite ? true : false,
-            activeDays,
-            firstBookingTime,
-            lastBookingTime,
-            tableAssignment,
-            status
-        });
+        /* ================= CREATE ================= */
+
+        const newPreference =
+            await SeatingPreference.create({
+
+                preferenceName:
+                    preferenceName.trim(),
+
+                restaurantId,
+
+                startDate,
+
+                endDate:
+                    indefinite
+                        ? null
+                        : endDate,
+
+                indefinite:
+                    !!indefinite,
+
+                activeDays,
+
+                firstBookingTime,
+
+                lastBookingTime,
+
+                // FIXED TABLE IDS
+                tableIds:
+                    uniqueTableIds,
+
+                status
+            });
 
         return res.status(201).json({
             success: true,
-            message: "Seating preference added successfully",
+            message:
+                "Seating preference added successfully",
             data: newPreference
         });
 
     } catch (error) {
+
+        console.error(
+            "Add seating preference error:",
+            error
+        );
+
         return res.status(500).json({
             success: false,
-            message: error.message || "Internal server error"
+            message:
+                error.message ||
+                "Internal server error"
         });
     }
 };
@@ -308,11 +474,15 @@ exports.toggleSeatingPreferenceStatus = async (req, res) => {
 };
 
 exports.getAllPreference = async (req, res) => {
+
     try {
+
         const { restaurantId } = req.body;
 
         /* ================= VALIDATION ================= */
+
         if (!restaurantId) {
+
             return res.status(400).json({
                 success: false,
                 message: "restaurantId is required"
@@ -320,45 +490,111 @@ exports.getAllPreference = async (req, res) => {
         }
 
         /* ================= FETCH DATA ================= */
-        const preferences = await SeatingPreference.find({
-            restaurantId
-        })
-            .sort({ createdAt: 1 })
-            .select("-createdAt -updatedAt -__v");
+
+        const preferences =
+            await SeatingPreference.find({
+                restaurantId
+            })
+                .populate({
+                    path: "tableIds",
+                    select:
+                        "_id tableNumber displayName capacity shape status"
+                })
+                .sort({ createdAt: 1 })
+                .select(
+                    "-createdAt -updatedAt -__v"
+                );
 
         /* ================= FORMAT RESPONSE ================= */
-        const formattedPrefences = preferences.map((p) => ({
-            _id: p._id,
-            preferenceName: p.preferenceName,
 
-            startDate: formatDate(p.startDate),
-            endDate: p.indefinite ? null : formatDate(p.endDate),
+        const formattedPreferences =
+            preferences.map((p) => ({
 
-            indefinite: p.indefinite,
-            activeDays: p.activeDays,
+                _id: p._id,
 
-            firstBookingTime: formatTime(p.firstBookingTime),
-            lastBookingTime: formatTime(p.lastBookingTime),
+                preferenceName:
+                    p.preferenceName,
 
-            tableAssignment: p.tableAssignment,
-            status: p.status,
-            restaurantId: p.restaurantId
-        }));
+                startDate:
+                    formatDate(p.startDate),
+
+                endDate:
+                    p.indefinite
+                        ? null
+                        : formatDate(p.endDate),
+
+                indefinite:
+                    p.indefinite,
+
+                activeDays:
+                    p.activeDays,
+
+                firstBookingTime:
+                    formatTime(
+                        p.firstBookingTime
+                    ),
+
+                lastBookingTime:
+                    formatTime(
+                        p.lastBookingTime
+                    ),
+
+                /* ================= FIXED TABLE IDS ================= */
+
+                tableIds:
+                    p.tableIds?.map((table) => ({
+
+                        _id: table._id,
+
+                        tableNumber:
+                            table.tableNumber,
+
+                        displayName:
+                            table.displayName,
+
+                        capacity:
+                            table.capacity,
+
+                        shape:
+                            table.shape,
+
+                        status:
+                            table.status
+                    })) || [],
+
+                status:
+                    p.status,
+
+                restaurantId:
+                    p.restaurantId
+            }));
 
         /* ================= RESPONSE ================= */
+
         return res.status(200).json({
             success: true,
-            message: "Seating preferences fetched successfully",
-            count: formattedPrefences.length,
-            data: formattedPrefences
+            message:
+                "Seating preferences fetched successfully",
+
+            count:
+                formattedPreferences.length,
+
+            data:
+                formattedPreferences
         });
 
     } catch (error) {
-        console.error("getAllPreference error:", error);
+
+        console.error(
+            "getAllPreference error:",
+            error
+        );
 
         return res.status(500).json({
             success: false,
-            message: error.message || "Internal server error"
+            message:
+                error.message ||
+                "Internal server error"
         });
     }
 };
@@ -792,6 +1028,347 @@ exports.getwidgetSeatingPrefrencesName = async (req, res) => {
             success: false,
             message: "Error fetching seating preferences",
             error: error.message
+        });
+    }
+};
+
+exports.getAvailableTablesByPreference = async (req, res) => {
+    try {
+
+        const {
+            seatingPreferenceId,
+            date,
+            time,
+            partySize
+        } = req.body;
+
+        /* ================= VALIDATION ================= */
+
+        if (
+            !seatingPreferenceId ||
+            !date ||
+            !time ||
+            !partySize
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "seatingPreferenceId, date, time and partySize are required"
+            });
+        }
+
+        if (
+            !mongoose.Types.ObjectId.isValid(
+                seatingPreferenceId
+            )
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid seatingPreferenceId"
+            });
+        }
+
+        if (
+            isNaN(partySize) ||
+            Number(partySize) <= 0
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid partySize"
+            });
+        }
+
+        /* ================= FETCH PREFERENCE ================= */
+
+        const preference =
+            await SeatingPreference.findById(
+                seatingPreferenceId
+            ).lean();
+
+        if (!preference) {
+            return res.status(404).json({
+                success: false,
+                message:
+                    "Seating preference not found"
+            });
+        }
+
+        if (preference.status !== "Active") {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Seating preference is inactive"
+            });
+        }
+
+        /* ================= DATE VALIDATION ================= */
+
+        // ACCEPT MULTIPLE DATE FORMATS
+        const selectedDate = moment(
+            date,
+            [
+                "YYYY-MM-DD",
+                "DD/MM/YYYY",
+                "MM/DD/YYYY",
+                "DD-MM-YYYY",
+                "MM-DD-YYYY",
+                "YYYY/MM/DD"
+            ],
+            true
+        );
+
+        if (!selectedDate.isValid()) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Invalid date format"
+            });
+        }
+
+        // NORMALIZED DATE
+        const formattedDate =
+            selectedDate.format("YYYY-MM-DD");
+
+        const startDate = moment(
+            preference.startDate
+        ).startOf("day");
+
+        if (selectedDate.isBefore(startDate)) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Preference is not active yet"
+            });
+        }
+
+        if (
+            !preference.indefinite &&
+            preference.endDate
+        ) {
+
+            const endDate = moment(
+                preference.endDate
+            ).endOf("day");
+
+            if (selectedDate.isAfter(endDate)) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Preference has expired"
+                });
+            }
+        }
+
+        /* ================= ACTIVE DAY VALIDATION ================= */
+
+        const dayMap = [
+            "Su",
+            "Mo",
+            "Tu",
+            "We",
+            "Th",
+            "Fr",
+            "Sa"
+        ];
+
+        const selectedDay =
+            dayMap[selectedDate.day()];
+
+        if (
+            !preference.activeDays.includes(
+                selectedDay
+            )
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    `Preference not available on ${selectedDay}`
+            });
+        }
+
+        /* ================= TIME VALIDATION ================= */
+
+        const selectedTime = moment(
+            time,
+            [
+                "hh:mm A",
+                "h:mm A",
+                "HH:mm"
+            ],
+            true
+        );
+
+        if (!selectedTime.isValid()) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Invalid time format"
+            });
+        }
+
+        // STORE IN 24 HOUR FORMAT
+        const formattedTime =
+            selectedTime.format("HH:mm");
+
+        const firstBookingTime = moment(
+            preference.firstBookingTime,
+            ["hh:mm A", "HH:mm"]
+        );
+
+        const lastBookingTime = moment(
+            preference.lastBookingTime,
+            ["hh:mm A", "HH:mm"]
+        );
+
+        const selectedMinutes =
+            selectedTime.hours() * 60 +
+            selectedTime.minutes();
+
+        const firstMinutes =
+            firstBookingTime.hours() * 60 +
+            firstBookingTime.minutes();
+
+        const lastMinutes =
+            lastBookingTime.hours() * 60 +
+            lastBookingTime.minutes();
+
+        /* ================= TIME RANGE CHECK ================= */
+
+        if (
+            selectedMinutes < firstMinutes ||
+            selectedMinutes > lastMinutes
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    `Preference available only between ${preference.firstBookingTime} and ${preference.lastBookingTime}`
+            });
+        }
+
+        /* ================= FETCH TABLES ================= */
+
+        const allTables = await Table.find({
+
+            _id: {
+                $in: preference.tableIds
+            },
+
+            status: {
+                $ne: "OutOfService"
+            },
+
+            capacity: {
+                $gte: Number(partySize)
+            }
+
+        })
+            .select(
+                "_id tableNumber capacity displayName shape status"
+            )
+            .lean();
+
+        if (!allTables.length) {
+            return res.status(404).json({
+                success: false,
+                message:
+                    "No active tables available for this preference or party size"
+            });
+        }
+
+        /* ================= FIND BOOKED TABLES ================= */
+
+        const bookedReservations =
+            await Reservation.find({
+
+                date: {
+                    $gte: new Date(
+                        `${formattedDate}T00:00:00.000Z`
+                    ),
+
+                    $lte: new Date(
+                        `${formattedDate}T23:59:59.999Z`
+                    )
+                },
+
+                time: formattedTime,
+
+                status: {
+                    $nin: [
+                        "Cancelled",
+                        "Finished",
+                        "No-Show"
+                    ]
+                },
+
+                tableIds: {
+                    $exists: true,
+                    $ne: []
+                }
+
+            })
+                .select("tableIds")
+                .lean();
+
+        /* ================= EXTRACT BOOKED TABLE IDS ================= */
+
+        const bookedTableIds = [
+            ...new Set(
+                bookedReservations.flatMap(
+                    (reservation) =>
+                        (reservation.tableIds || []).map(
+                            (id) =>
+                                id.toString()
+                        )
+                )
+            )
+        ];
+
+        /* ================= FILTER AVAILABLE TABLES ================= */
+
+        const availableTables =
+            allTables.filter(
+                (table) =>
+                    !bookedTableIds.includes(
+                        table._id.toString()
+                    )
+            );
+
+        /* ================= RESPONSE ================= */
+
+        return res.status(200).json({
+            success: true,
+
+            message:
+                "Available tables fetched successfully",
+
+            selectedDate: formattedDate,
+
+            selectedTime: formattedTime,
+
+            requestedPartySize:
+                Number(partySize),
+
+            totalTables:
+                allTables.length,
+
+            bookedTables:
+                bookedTableIds.length,
+
+            availableCount:
+                availableTables.length,
+
+            data: availableTables
+        });
+
+    } catch (error) {
+
+        console.error("getAvailableTablesByPreference error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message:
+                error.message ||
+                "Internal server error"
         });
     }
 };
