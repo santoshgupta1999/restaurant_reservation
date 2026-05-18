@@ -187,12 +187,12 @@ exports.createRestaurant = async (req, res) => {
         // CREATE MANAGER USER if not exists
         let manager = await User.findOne({ email: managerEmail.toLowerCase() });
         if (!manager) {
-            const hashed = await bcrypt.hash("Temp@123", 10);
+            const hashed = await bcrypt.hash("remi123", 10);
             manager = await User.create({
-                name: "Manager",
+                name: "Admin",
                 email: managerEmail.toLowerCase(),
                 password: hashed,
-                role: "Manager",
+                role: "Admin",
                 restaurantId: venue._id
             });
         }
@@ -202,7 +202,7 @@ exports.createRestaurant = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: "Restaurant + Manager created successfully",
+            message: "Restaurant + Admin created successfully",
             venue
         });
 

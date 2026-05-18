@@ -40,19 +40,17 @@ const formatDate = (
         .format(DATE_ONLY_FORMAT);
 };
 
-const formatTime = (
-    value,
-    timezone
-) => {
+/* ================= FIXED TIME FORMAT ================= */
+
+const formatTime = (value) => {
 
     if (!value) return null;
 
     return moment(
         value,
-        ["HH:mm", "hh:mm A"]
-    )
-        .tz(resolveTimezone(timezone))
-        .format(TIME_ONLY_FORMAT);
+        ["HH:mm", "hh:mm A"],
+        true
+    ).format(TIME_ONLY_FORMAT);
 };
 
 /* ================= RAW + FORMATTED ================= */
@@ -81,10 +79,7 @@ const formatWithRaw = (
 
     } else if (type === "time") {
 
-        formatted = formatTime(
-            value,
-            timezone
-        );
+        formatted = formatTime(value);
 
     } else {
 

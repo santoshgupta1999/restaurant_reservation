@@ -953,7 +953,7 @@ exports.getGlobalVisit = async (req, res) => {
         const reservations = await Reservation.find({ guestId })
             .select("_id date restaurantId partySize source status tableId")
             .populate("restaurantId", "venueName")
-            .populate("tableId", "tableNumber")
+            .populate("tableIds", "tableNumber")
             .sort({ date: 1 });
 
         const formattedData = reservations.map(d => ({
