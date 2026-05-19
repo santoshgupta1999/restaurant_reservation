@@ -5,6 +5,7 @@ const bcrypt = require("bcrypt");
 const mongoose = require("mongoose");
 const Table = require("../models/table.model");
 const Reservation = require("../models/reservation.model");
+const Guest = require("../models/guest.model");
 const moment = require("moment");
 const {
     formatDate,
@@ -391,39 +392,234 @@ exports.addSeatingPreference = async (req, res) => {
 };
 
 exports.deleteSeatingPreference = async (req, res) => {
-    try {
-        const { id } = req.body || {}; // ya req.params.id
 
-        /* ================= BASIC VALIDATION ================= */
+    const session = await mongoose.startSession();
+
+    try {
+
+        const {
+            id,
+            action = "cancel", // cancel | legacy
+            notifyGuests = true
+        } = req.body;
+
         if (!id) {
             return res.status(400).json({
                 success: false,
-                message: "Seating preference ID is required"
+                message: "Seating preference ID is required."
             });
         }
 
-        /* ================= FIND FIRST ================= */
-        const seatingPreference = await SeatingPreference.findById(id);
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid seating preference ID."
+            });
+        }
+
+        if (!["cancel", "legacy"].includes(action)) {
+            return res.status(400).json({
+                success: false,
+                message: "action must be either cancel or legacy."
+            });
+        }
+
+        session.startTransaction();
+
+        /* ================= PREFERENCE ================= */
+
+        const seatingPreference =
+            await SeatingPreference.findById(id)
+                .session(session);
 
         if (!seatingPreference) {
+
+            await session.abortTransaction();
+            session.endSession();
+
             return res.status(404).json({
                 success: false,
-                message: "Seating preference not found"
+                message: "Seating preference not found."
             });
         }
 
-        /* ================= DELETE ================= */
-        await SeatingPreference.deleteOne({ _id: id });
+        /* ================= FUTURE RESERVATIONS ================= */
+
+        const todayStart = moment()
+            .startOf("day")
+            .toDate();
+
+        const reservations = await Reservation.find({
+            "seating._id": seatingPreference._id,
+            status: {
+                $in: [
+                    "Pending",
+                    "Confirmed",
+                    "Upcoming"
+                ]
+            },
+            date: { $gte: todayStart }
+        }).session(session);
+
+        /* ================= CANCEL FLOW ================= */
+
+        if (action === "cancel") {
+
+            for (const reservation of reservations) {
+
+                reservation.status = "Cancelled";
+
+                reservation.cancellation =
+                    reservation.cancellation || {};
+
+                reservation.cancellation.at =
+                    new Date();
+
+                reservation.cancellation.reason =
+                    `Cancelled due to deleted seating preference (${seatingPreference.preferenceName})`;
+
+                reservation.cancellation.source =
+                    "seating_preference";
+
+                await reservation.save({ session });
+
+                /* FREE TABLES */
+
+                if (
+                    reservation.tableIds &&
+                    reservation.tableIds.length
+                ) {
+
+                    await Table.updateMany(
+                        {
+                            _id: {
+                                $in: reservation.tableIds
+                            }
+                        },
+                        {
+                            $set: {
+                                status: "Available"
+                            }
+                        },
+                        { session }
+                    );
+                }
+
+                /* EMAIL */
+
+                if (notifyGuests) {
+
+                    try {
+
+                        const guest =
+                            await Guest.findById(
+                                reservation.guestId
+                            );
+
+                        if (guest?.email) {
+
+                            await sendReservationNotification(
+                                reservation,
+                                guest,
+                                "Cancelled"
+                            );
+                        }
+
+                    } catch (emailError) {
+
+                        console.error(
+                            "Cancellation email error:",
+                            emailError.message
+                        );
+                    }
+                }
+            }
+        }
+
+        /* ================= LEGACY FLOW ================= */
+
+        if (action === "legacy") {
+
+            for (const reservation of reservations) {
+
+                const oldTableIds =
+                    reservation.tableIds || [];
+
+                reservation.isLegacy = true;
+
+                reservation.legacyReason =
+                    `Seating preference deleted (${seatingPreference.preferenceName})`;
+
+                reservation.tableIds = [];
+
+                reservation.seating = null;
+
+                reservation.notes =
+                    `${reservation.notes || ""}\nMarked as legacy due to deleted seating preference`;
+
+                await reservation.save({ session });
+
+                /* FREE OLD TABLES */
+
+                if (oldTableIds.length) {
+
+                    await Table.updateMany(
+                        {
+                            _id: {
+                                $in: oldTableIds
+                            }
+                        },
+                        {
+                            $set: {
+                                status: "Available"
+                            }
+                        },
+                        { session }
+                    );
+                }
+            }
+        }
+
+        /* ================= DELETE PREFERENCE ================= */
+
+        await SeatingPreference.findByIdAndDelete(
+            seatingPreference._id,
+            { session }
+        );
+
+        await session.commitTransaction();
+        session.endSession();
 
         return res.status(200).json({
             success: true,
-            message: "Seating preference deleted successfully"
+            message:
+                "Seating preference deleted successfully.",
+            data: {
+                preferenceId:
+                    seatingPreference._id,
+                preferenceName:
+                    seatingPreference.preferenceName,
+                action,
+                affectedReservations:
+                    reservations.length
+            }
         });
 
     } catch (error) {
+
+        await session.abortTransaction();
+        session.endSession();
+
+        console.error(
+            "Error deleting seating preference:",
+            error
+        );
+
         return res.status(500).json({
             success: false,
-            message: error.message || "Internal server error"
+            message:
+                "Error deleting seating preference.",
+            error: error.message
         });
     }
 };

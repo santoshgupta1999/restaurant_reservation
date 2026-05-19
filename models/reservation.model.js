@@ -82,6 +82,16 @@ const reservationSchema = new mongoose.Schema({
         default: null
     },
 
+    isLegacy: {
+        type: Boolean,
+        default: false
+    },
+
+    legacyReason: {
+        type: String,
+        default: null
+    },
+
     cancellation: {
         reason: {
             type: String,
@@ -89,7 +99,7 @@ const reservationSchema = new mongoose.Schema({
         },
         source: {
             type: String,
-            enum: ["foh", "guest", "block", "shift", "table"],
+            enum: ["foh", "guest", "block", "shift", "table", "seating_preference"],
             default: null
         },
         actorId: {

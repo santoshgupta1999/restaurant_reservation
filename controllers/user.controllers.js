@@ -8,7 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const mongoose = require('mongoose');
 const crypto = require("crypto");
-const { formatDateTime } = require("../utils/dateFormatter");
+const { formatDateTime, formatLoginDateTime } = require("../utils/dateFormatter");
 const RolePermission = require("../models/rolePermission.model.js");
 const FEATURES = require("../configs/features.js");
 
@@ -342,7 +342,7 @@ exports.getProfile = async (req, res) => {
                 phone: user.phone,
                 role: user.role,
                 isActive: user.isActive,
-                lastLogin: formatDateTime(user.lastLogin),
+                lastLogin: user.lastLogin,
                 imageUrl
             }
         });
@@ -1533,7 +1533,7 @@ exports.getSuperAdmins = async (req, res) => {
             role: "Super Admin",
             status: u.isActive ? "Active" : "Inactive",
             lastLogin: u.lastLogin
-                ? formatDateTime(u.lastLogin)
+                ? u.lastLogin
                 : null
         }));
 

@@ -1347,7 +1347,7 @@ exports.createWidgetReservation = async (req, res) => {
                 statusChanged = true;
             }
             // UPDATE
-            // if (tableIds) existingReservation.tableIds = tableIds;
+            if (tableIds) existingReservation.tableIds = tableIds;
 
             if (date) existingReservation.date = reservationDate;
 

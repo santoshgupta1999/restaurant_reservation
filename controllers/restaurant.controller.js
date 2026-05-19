@@ -12,6 +12,9 @@ const bcrypt = require("bcryptjs");
 const moment = require("moment");
 const Block = require("../models/block.model");
 const { formatTime, formatDate } = require("../utils/dateFormatter");
+const { sendReservationNotification } = require("../utils/reservationNotification");
+const Table = require("../models/table.model");
+const Guest = require("../models/guest.model");
 
 // exports.createRestaurant = async (req, res) => {
 //     try {
@@ -801,27 +804,91 @@ exports.createShift = async (req, res) => {
             payload.payment = undefined;
         }
 
-        const { restaurantId, startDate, startTime, endTime } = payload;
-
-        /* ================= OVERLAP CHECK (BEFORE SAVE) ================= */
-        const overlapQuery = {
+        const {
             restaurantId,
             startDate,
-            startTime: { $lt: endTime },
-            endTime: { $gt: startTime }
-        };
+            startTime,
+            endTime,
+            daysActive = [],
+            type
+        } = payload;
 
-        // Exclude current shift in update case
-        if (shiftId) {
-            overlapQuery._id = { $ne: shiftId };
+        /* ================= OVERLAP CHECK ================= */
+
+        const existingShifts = await Shift.find({
+            restaurantId,
+            type,
+            ...(shiftId && {
+                _id: { $ne: shiftId }
+            })
+        });
+
+        const newStart = moment(startTime, "HH:mm");
+        let newEnd = moment(endTime, "HH:mm");
+
+        /* overnight shift */
+        if (newEnd.isSameOrBefore(newStart)) {
+            newEnd.add(1, "day");
         }
 
-        const overlappingShift = await Shift.findOne(overlapQuery);
+        let overlappingShift = null;
+
+        for (const existing of existingShifts) {
+
+            /* ================= DATE MATCH ================= */
+
+            const sameDate =
+                moment(existing.startDate)
+                    .format("YYYY-MM-DD") ===
+                moment(startDate)
+                    .format("YYYY-MM-DD");
+
+            /* ================= DAY MATCH ================= */
+
+            const hasCommonDay =
+                !daysActive?.length ||
+                !existing.daysActive?.length ||
+                daysActive.some(day =>
+                    existing.daysActive.includes(day)
+                );
+
+            if (!sameDate && !hasCommonDay) {
+                continue;
+            }
+
+            const existingStart = moment(
+                existing.startTime,
+                "HH:mm"
+            );
+
+            let existingEnd = moment(
+                existing.endTime,
+                "HH:mm"
+            );
+
+            /* overnight existing shift */
+            if (
+                existingEnd.isSameOrBefore(existingStart)
+            ) {
+                existingEnd.add(1, "day");
+            }
+
+            const isOverlap =
+                newStart.isBefore(existingEnd) &&
+                newEnd.isAfter(existingStart);
+
+            if (isOverlap) {
+                overlappingShift = existing;
+                break;
+            }
+        }
 
         if (overlappingShift) {
+
             return res.status(400).json({
                 success: false,
-                message: "Shift overlaps with an existing shift"
+                message:
+                    `Shift overlaps with ${overlappingShift.name}, (${overlappingShift.startTime} - ${overlappingShift.endTime})`
             });
         }
 
@@ -1050,48 +1117,48 @@ exports.updateShift = async (req, res) => {
     }
 };
 
-exports.deleteShift = async (req, res) => {
-    try {
-        const { id } = req.body;
+// exports.deleteShift = async (req, res) => {
+//     try {
+//         const { id } = req.body;
 
-        if (!id) {
-            return res.status(400).json({
-                success: false,
-                message: "Shift ID is required in body.",
-            });
-        }
+//         if (!id) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Shift ID is required in body.",
+//             });
+//         }
 
-        if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid shift ID.",
-            });
-        }
+//         if (!mongoose.Types.ObjectId.isValid(id)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Invalid shift ID.",
+//             });
+//         }
 
-        const deletedShift = await Shift.findByIdAndDelete(id);
+//         const deletedShift = await Shift.findByIdAndDelete(id);
 
-        if (!deletedShift) {
-            return res.status(404).json({
-                success: false,
-                message: "Shift not found.",
-            });
-        }
+//         if (!deletedShift) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "Shift not found.",
+//             });
+//         }
 
-        return res.status(200).json({
-            success: true,
-            message: "Shift deleted successfully.",
-        });
+//         return res.status(200).json({
+//             success: true,
+//             message: "Shift deleted successfully.",
+//         });
 
-    } catch (error) {
-        console.error("Error deleting shift:", error.message);
+//     } catch (error) {
+//         console.error("Error deleting shift:", error.message);
 
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error.",
-            error: error.message,
-        });
-    }
-};
+//         return res.status(500).json({
+//             success: false,
+//             message: "Internal server error.",
+//             error: error.message,
+//         });
+//     }
+// };
 
 exports.getActiveShiftsForToday = async (req, res) => {
     try {
@@ -2013,6 +2080,209 @@ exports.getShiftNamesByRestaurant = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Internal server error",
+            error: error.message
+        });
+    }
+};
+
+exports.deleteShift = async (req, res) => {
+
+    const session = await mongoose.startSession();
+
+    try {
+
+        const {
+            id,
+            action = "cancel", // cancel | legacy
+            notifyGuests = true
+        } = req.body;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "Shift ID is required."
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid shift ID."
+            });
+        }
+
+        if (!["cancel", "legacy"].includes(action)) {
+            return res.status(400).json({
+                success: false,
+                message: "action must be either cancel or legacy."
+            });
+        }
+
+        session.startTransaction();
+
+        /* ================= SHIFT ================= */
+
+        const shift = await Shift.findById(id).session(session);
+
+        if (!shift) {
+
+            await session.abortTransaction();
+            session.endSession();
+
+            return res.status(404).json({
+                success: false,
+                message: "Shift not found."
+            });
+        }
+
+        /* ================= FUTURE RESERVATIONS ================= */
+
+        const todayStart = moment()
+            .startOf("day")
+            .toDate();
+
+        const reservations = await Reservation.find({
+            shiftId: shift._id,
+            status: {
+                $in: [
+                    "Pending",
+                    "Confirmed",
+                    "Upcoming"
+                ]
+            },
+            date: { $gte: todayStart }
+        }).session(session);
+
+        /* ================= CANCEL FLOW ================= */
+
+        if (action === "cancel") {
+
+            for (const reservation of reservations) {
+
+                reservation.status = "Cancelled";
+
+                reservation.cancellation.at = new Date();
+
+                reservation.cancellation.reason =
+                    `Cancelled due to deleted shift (${shift.name})`;
+
+                reservation.cancellation.source = "shift";
+
+                await reservation.save({ session });
+
+                /* free tables */
+                if (
+                    reservation.tableIds &&
+                    reservation.tableIds.length
+                ) {
+
+                    await Table.updateMany(
+                        {
+                            _id: {
+                                $in: reservation.tableIds
+                            }
+                        },
+                        {
+                            $set: {
+                                status: "Available"
+                            }
+                        },
+                        { session }
+                    );
+                }
+
+                /* OPTIONAL EMAIL */
+                const guest = await Guest.findById(
+                    reservation.guestId
+                );
+
+                // optional email
+                if (guest?.email) {
+                    await sendReservationNotification(
+                        reservation,
+                        guest,
+                        "Cancelled"
+                    );
+                }
+            }
+        }
+
+        /* ================= LEGACY FLOW ================= */
+
+        if (action === "legacy") {
+
+            for (const reservation of reservations) {
+
+                reservation.isLegacy = true;
+
+                reservation.legacyReason =
+                    `Shift deleted (${shift.name})`;
+
+                reservation.tableIds = [];
+
+                reservation.notes =
+                    `${reservation.notes || ""}\nMarked as legacy due to deleted shift`;
+
+                await reservation.save({ session });
+
+                /* free old tables */
+                if (
+                    reservation.tableIds &&
+                    reservation.tableIds.length
+                ) {
+
+                    await Table.updateMany(
+                        {
+                            _id: {
+                                $in: reservation.tableIds
+                            }
+                        },
+                        {
+                            $set: {
+                                status: "Available"
+                            }
+                        },
+                        { session }
+                    );
+                }
+            }
+        }
+
+        /* ================= DELETE SHIFT ================= */
+
+        await Shift.findByIdAndDelete(
+            shift._id,
+            { session }
+        );
+
+        await session.commitTransaction();
+        session.endSession();
+
+        return res.status(200).json({
+            success: true,
+            message: "Shift deleted successfully.",
+            data: {
+                shiftId: shift._id,
+                shiftName: shift.name,
+                action,
+                affectedReservations:
+                    reservations.length
+            }
+        });
+
+    } catch (error) {
+
+        await session.abortTransaction();
+        session.endSession();
+
+        console.error(
+            "Error deleting shift:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            message: "Error deleting shift.",
             error: error.message
         });
     }

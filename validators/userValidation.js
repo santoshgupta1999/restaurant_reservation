@@ -59,10 +59,10 @@ exports.updateProfileValidator = [
         .isLength({ min: 2 })
         .withMessage("Name must be at least 2 characters."),
 
-    body("phone")
-        .optional()
-        .matches(/^[0-9]{10}$/)
-        .withMessage("Phone must be a valid 10-digit number."),
+    // body("phone")
+    //     .optional()
+    //     .matches(/^[0-9]{10}$/)
+    //     .withMessage("Phone must be a valid 10-digit number."),
 
     body("email")
         .trim()
