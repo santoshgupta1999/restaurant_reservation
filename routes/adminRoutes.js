@@ -25,6 +25,7 @@ router.put('/restaurants/:id',
 router.delete('/restaurants/:id', verifyToken, restController.deleteRestaurant);
 router.get('/getActiveRestaurants', verifyToken, restController.getActiveRestaurants);
 router.put('/updateRestaurantStatus/:id', restController.updateRestaurantStatus);
+router.post('/changeRestaurantStatus', verifyToken, requireRole("super_admin"), restController.changeRestaurantStatus);
 
 // ------------------------ Restaurant edit details admin side  -------------------------- //
 

@@ -1651,7 +1651,7 @@ exports.updateTableStatus = async (req, res) => {
 
             // First try existing reservation
             updatedReservation = await Reservation.findOne({
-                tableId: id,
+                tableIds: id,
                 date: {
                     $gte: todayStart,
                     $lte: todayEnd
@@ -1732,7 +1732,7 @@ exports.updateTableStatus = async (req, res) => {
         if (status === "Available") {
 
             updatedReservation = await Reservation.findOne({
-                tableId: id,
+                tableIds: id,
                 date: {
                     $gte: todayStart,
                     $lte: todayEnd

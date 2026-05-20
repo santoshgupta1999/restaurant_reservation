@@ -714,6 +714,94 @@ exports.updateRestaurantStatus = async (req, res) => {
     }
 };
 
+exports.changeRestaurantStatus = async (req, res) => {
+    try {
+
+        const {
+            restaurantId,
+            status
+        } = req.body;
+
+        /* ================= VALIDATION ================= */
+
+        if (!restaurantId) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId is required"
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid restaurantId"
+            });
+        }
+
+        const allowedStatuses = [
+            "Trial",
+            "Active",
+            "Suspended",
+            "Locked"
+        ];
+
+        if (!status || !allowedStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Valid status is required (Trial, Active, Suspended, Locked)"
+            });
+        }
+
+        /* ================= RESTAURANT ================= */
+
+        const restaurant = await Restaurant.findById(
+            restaurantId
+        );
+
+        if (!restaurant) {
+            return res.status(404).json({
+                success: false,
+                message: "Restaurant not found"
+            });
+        }
+
+        /* ================= ALREADY SAME ================= */
+
+        if (restaurant.status === status) {
+            return res.status(400).json({
+                success: false,
+                message: `Restaurant already ${status}`
+            });
+        }
+
+        /* ================= UPDATE ================= */
+
+        restaurant.status = status;
+
+        await restaurant.save();
+
+        return res.status(200).json({
+            success: true,
+            message: `Restaurant status updated to ${status}`,
+        });
+
+    } catch (error) {
+
+        console.error(
+            "Error updating restaurant status:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            message:
+                "Error updating restaurant status",
+            error: error.message
+        });
+    }
+};
+
 // -------------------------------------------- Shift -------------------------------------------- //
 function convertTo24Hour(time12h) {
     if (!time12h) return time12h;

@@ -11,6 +11,7 @@ const {
     formatDate,
     formatTime
 } = require("../utils/dateFormatter");
+const { sendReservationNotification } = require("../utils/reservationNotification");
 
 // exports.addSeatingPreference = async (req, res) => {
 //     try {
@@ -450,7 +451,7 @@ exports.deleteSeatingPreference = async (req, res) => {
             .toDate();
 
         const reservations = await Reservation.find({
-            "seating._id": seatingPreference._id,
+            seating: seatingPreference._id,
             status: {
                 $in: [
                     "Pending",
