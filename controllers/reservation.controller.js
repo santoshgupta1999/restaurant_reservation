@@ -11,6 +11,7 @@ const mongoose = require('mongoose');
 const sendEmail = require('../utils/mailer'); // <-- optional Email helper
 const { sendReservationNotification } = require("../utils/reservationNotification");
 const { formatDate, formatDateTime, formatTime } = require('../utils/dateFormatter');
+const moment = require("moment-timezone");
 
 
 function convertTo24Hour(time) {
@@ -498,7 +499,15 @@ exports.getReservations = async (req, res) => {
             })
             .populate({
                 path: "shiftId",
-                select: "name startTime endTime type"
+                select: `
+                name
+                startTime
+                endTime
+                type
+                sameDurationForAll
+                duration
+                durationByPartySize
+                `
             })
             .populate({
                 path: "seating",
@@ -517,16 +526,75 @@ exports.getReservations = async (req, res) => {
             obj.createdAt = formatDate(obj.createdAt);
             obj.updatedAt = formatDate(obj.updatedAt);
 
-            obj.arrivedAt = formatDateTime(obj.arrivedAt);
-            obj.seatedAt = formatDateTime(obj.seatedAt);
-            obj.finishedAt = formatDateTime(obj.finishedAt);
+            obj.arrivedAt = formatTime(obj.arrivedAt);
+            obj.seatedAt = formatTime(obj.seatedAt);
+            obj.finishedAt = formatTime(obj.finishedAt);
             if (obj.cancellation?.at) {
                 obj.cancellation.at = formatDateTime(obj.cancellation.at);
             }
 
             /* Convert reservation time */
             if (obj.time) {
-                obj.time = formatTime(obj.time);
+
+                // reservation start time
+                const startTime24 = convertTo24Hour(obj.time);
+
+                let duration = 120; // fallback 2h
+
+                /* ================= SHIFT DURATION ================= */
+
+                if (obj.shiftId) {
+
+                    // same duration for all
+                    if (
+                        obj.shiftId.sameDurationForAll &&
+                        obj.shiftId.duration
+                    ) {
+
+                        duration = obj.shiftId.duration;
+                    }
+
+                    // duration by pax
+                    else if (
+                        !obj.shiftId.sameDurationForAll &&
+                        obj.shiftId.durationByPartySize?.length
+                    ) {
+
+                        const matchedTier =
+                            obj.shiftId.durationByPartySize.find(
+                                (tier) => {
+
+                                    const [min, max] =
+                                        tier.range
+                                            .split("-")
+                                            .map(Number);
+
+                                    return (
+                                        obj.partySize >= min &&
+                                        obj.partySize <= max
+                                    );
+                                }
+                            );
+
+                        if (matchedTier?.duration) {
+                            duration = matchedTier.duration;
+                        }
+                    }
+                }
+
+                /* ================= END TIME ================= */
+
+                const endTime = moment(
+                    startTime24,
+                    "HH:mm"
+                )
+                    .add(duration, "minutes")
+                    .format("hh:mm A");
+
+                /* ================= FINAL FORMAT ================= */
+
+                obj.time =
+                    `${formatTime(startTime24)} – ${endTime}`;
             }
 
             /* Shift time */

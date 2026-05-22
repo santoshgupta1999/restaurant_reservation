@@ -23,7 +23,7 @@ const formatDateTime = (
 
     if (!value) return null;
 
-    return moment(value)
+    return moment.utc(value)
         .tz(resolveTimezone(timezone))
         .format(DEFAULT_FORMAT);
 };
