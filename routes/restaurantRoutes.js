@@ -92,5 +92,6 @@ router.delete("/deleteStaff", seatingPreference.deleteStaff);
 router.post("/getAllStaff", seatingPreference.getAllStaff);
 
 router.post("/getRooms/:restaurantId", seatingPreference.getRoomsByRestaurant);
+router.get("/getSeatingPreferences/:restaurantId", seatingPreference.getSeatingPreferences);
 
 module.exports = router;

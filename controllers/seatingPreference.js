@@ -1569,3 +1569,42 @@ exports.getAvailableTablesByPreference = async (req, res) => {
         });
     }
 };
+
+exports.getSeatingPreferences = async (req, res) => {
+    try {
+
+        const { restaurantId } = req.params;
+
+        if (!restaurantId) {
+            return res.status(400).json({
+                success: false,
+                message: "restaurantId is required."
+            });
+        }
+
+        const preferences = await SeatingPreference.find({
+            restaurantId,
+            status: "Active"
+        })
+            .select("_id preferenceName")
+            .sort({ preferenceName: 1 });
+
+        return res.status(200).json({
+            success: true,
+            message: "Seating preferences fetched successfully.",
+            data: preferences.map(item => ({
+                id: item._id,
+                preferenceName: item.preferenceName
+            }))
+        });
+
+    } catch (error) {
+        console.error("Error fetching seating preferences:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching seating preferences.",
+            error: error.message
+        });
+    }
+};

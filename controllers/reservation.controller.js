@@ -526,9 +526,9 @@ exports.getReservations = async (req, res) => {
             obj.createdAt = formatDate(obj.createdAt);
             obj.updatedAt = formatDate(obj.updatedAt);
 
-            obj.arrivedAt = formatTime(obj.arrivedAt);
-            obj.seatedAt = formatTime(obj.seatedAt);
-            obj.finishedAt = formatTime(obj.finishedAt);
+            obj.arrivedAt = formatDateTime(obj.arrivedAt);
+            obj.seatedAt = formatDateTime(obj.seatedAt);
+            obj.finishedAt = formatDateTime(obj.finishedAt);
             if (obj.cancellation?.at) {
                 obj.cancellation.at = formatDateTime(obj.cancellation.at);
             }

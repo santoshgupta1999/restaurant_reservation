@@ -1848,45 +1848,68 @@ exports.unassignTable = async (req, res) => {
     const session = await mongoose.startSession();
 
     try {
-        const { tableId, force = false } = req.body;
 
-        if (!tableId) {
+        const { tableIds, force = false } = req.body;
+
+        if (!tableIds || !Array.isArray(tableIds) || tableIds.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "tableId is required."
+                message: "tableIds is required and must be an array."
             });
         }
 
         session.startTransaction();
 
-        const table = await Table.findById(tableId).session(session);
+        // Fetch all requested tables
+        const tables = await Table.find({
+            _id: { $in: tableIds }
+        }).session(session);
 
-        if (!table) {
+        if (!tables.length) {
             await session.abortTransaction();
+            session.endSession();
+
             return res.status(404).json({
                 success: false,
-                message: "Table not found."
+                message: "Table(s) not found."
             });
         }
 
-        let affectedTableIds = [tableId];
+        // Collect all affected table ids (including joined tables)
+        let affectedTableIds = [];
 
-        if (table.isJoined && table.joinedWith?.length) {
-            affectedTableIds = table.joinedWith.map(id => id.toString());
-        }
+        tables.forEach(table => {
+
+            affectedTableIds.push(table._id.toString());
+
+            if (table.isJoined && table.joinedWith?.length) {
+                table.joinedWith.forEach(id => {
+                    affectedTableIds.push(id.toString());
+                });
+            }
+
+        });
+
+        // Remove duplicate ids
+        affectedTableIds = [...new Set(affectedTableIds)];
 
         const now = new Date();
 
+        // Find reservation using any affected table
         const reservations = await Reservation.find({
-            tableId: { $in: affectedTableIds },
+            tableIds: { $in: affectedTableIds },
             status: { $in: ["Pending", "Confirmed", "Seated"] }
         }).session(session);
 
-        // helper to combine date + time
-        const getReservationDateTime = (r) => {
-            const d = new Date(r.date);
-            const [hh, mm] = r.time.split(":");
+        // Helper
+        const getReservationDateTime = (reservation) => {
+
+            const d = new Date(reservation.date);
+
+            const [hh, mm] = reservation.time.split(":");
+
             d.setHours(Number(hh), Number(mm), 0, 0);
+
             return d;
         };
 
@@ -1901,24 +1924,45 @@ exports.unassignTable = async (req, res) => {
         const nearest = validReservations[0]?.doc || null;
 
         if (nearest?.status === "Seated" && !force) {
+
             await session.abortTransaction();
+            session.endSession();
+
             return res.status(400).json({
                 success: false,
                 message: "Guest already seated. Use force=true to unassign."
             });
+
         }
 
         let updatedReservation = null;
 
         if (nearest) {
-            nearest.tableId = null;
+
+            // Remove affected table ids from reservation
+            nearest.tableIds = nearest.tableIds.filter(id =>
+                !affectedTableIds.includes(id.toString())
+            );
+
             updatedReservation = await nearest.save({ session });
+
         }
 
+        // Make all tables available
         await Table.updateMany(
-            { _id: { $in: affectedTableIds } },
-            { $set: { status: "Available" } },
-            { session }
+            {
+                _id: { $in: affectedTableIds }
+            },
+            {
+                $set: {
+                    status: "Available",
+                    isJoined: false,
+                    joinedWith: []
+                }
+            },
+            {
+                session
+            }
         );
 
         await session.commitTransaction();
@@ -1929,20 +1973,23 @@ exports.unassignTable = async (req, res) => {
             message: "Table unassigned successfully.",
             data: {
                 affectedTables: affectedTableIds,
-                reservationUpdated: updatedReservation || null
+                reservationUpdated: updatedReservation
             }
         });
 
     } catch (error) {
+
         await session.abortTransaction();
         session.endSession();
 
-        console.error("Error unassigning table:", error);
+        console.error(error);
+
         return res.status(500).json({
             success: false,
             message: "Error unassigning table.",
             error: error.message
         });
+
     }
 };
 
