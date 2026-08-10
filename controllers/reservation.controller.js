@@ -209,7 +209,7 @@ exports.createReservation = async (req, res) => {
                 restaurantId,
                 tableIds: { $in: tableIds },
                 date: reservationDate,
-                time,
+                time: convertTo24Hour(time),
                 status: { $in: ["Pending", "Confirmed", "Upcoming", "Seated"] },
                 _id: { $ne: reservationId }
             });
@@ -217,7 +217,7 @@ exports.createReservation = async (req, res) => {
             if (existingBooking) {
                 return res.status(400).json({
                     success: false,
-                    message: "One or more selected tables are already booked for the selected Date & Time."
+                    message: "This table is already booked by another guest. Please choose another table."
                 });
             }
         }

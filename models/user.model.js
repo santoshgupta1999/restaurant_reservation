@@ -18,7 +18,7 @@ const UserSchema = new mongoose.Schema(
         },
         role: {
             type: String,
-            enum: ['Admin', 'Host', 'super_admin', 'Manager', 'Call Center'],
+            enum: ['Admin', 'Host', 'super_admin', 'Manager', 'Call Center', 'admin', 'host', 'manager', 'user', 'call center', 'call_center'],
             default: 'Manager',
         },
         profileImage: {

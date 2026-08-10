@@ -1403,13 +1403,272 @@ exports.updateShiftStatus = async (req, res) => {
     }
 };
 
-const DEFAULT_TIMEZONE = process.env.APP_TIMEZONE;
+const DEFAULT_TIMEZONE = process.env.APP_TIMEZONE || "Asia/Kolkata";
+
+async function getAvailableSlotsByDateAndTimezone({ restaurantId, date, partySize = 1 }) {
+    /* ================= RESTAURANT FETCH ================= */
+    const restaurant = await Restaurant.findById(restaurantId);
+    if (!restaurant) {
+        throw new Error("Restaurant not found");
+    }
+
+    const restaurantTimezone = restaurant.timezone || DEFAULT_TIMEZONE;
+
+    /* ================= DATE PARSE ================= */
+    const DATE_FORMATS = [
+        "YYYY-MM-DD",
+        "DD/MM/YYYY",
+        "MM/DD/YYYY",
+        "DD-MM-YYYY"
+    ];
+
+    const selectedDate = moment.tz(date, DATE_FORMATS, true, restaurantTimezone);
+    if (!selectedDate.isValid()) {
+        throw new Error("Invalid date format");
+    }
+
+    const normalizedDate = selectedDate.format("YYYY-MM-DD");
+    // now is current time in restaurant's timezone with seconds and ms set to 0 for exact minute comparison
+    const now = moment.tz(restaurantTimezone).seconds(0).milliseconds(0);
+    const todayStr = now.format("YYYY-MM-DD");
+    const selectedDay = selectedDate.format("dd");
+
+    /* ================= DATE CLASSIFICATION ================= */
+    const isToday = normalizedDate === todayStr;
+    const isPast = selectedDate.isBefore(now, "day");
+
+    // Add environment-level debug logging
+    console.log({
+        environment: process.env.NODE_ENV,
+        serverDate: new Date().toISOString(),
+        restaurantTimezone,
+        restaurantNow: moment().tz(restaurantTimezone).format(
+            "YYYY-MM-DD HH:mm:ss Z"
+        ),
+        requestedDate: normalizedDate,
+        todayInRestaurantTimezone: todayStr
+    });
+
+    if (isPast) {
+        return {
+            restaurantId,
+            date: normalizedDate,
+            totalShifts: 0,
+            data: []
+        };
+    }
+
+    /* ================= BLOCK FETCH ================= */
+    const blocks = await Block.find({
+        restaurantId,
+        status: "Active",
+        isExpired: false,
+        startDate: { $lte: selectedDate.toDate() },
+        endDate: { $gte: selectedDate.toDate() }
+    });
+
+    /* ================= FULL DAY BLOCK ================= */
+    const hasFullDayBlock = blocks.some(b =>
+        b.isFullRestaurantBlock &&
+        !b.startTime &&
+        !b.endTime
+    );
+
+    if (hasFullDayBlock) {
+        return {
+            restaurantId,
+            date: normalizedDate,
+            totalShifts: 0,
+            data: []
+        };
+    }
+
+    /* ================= SHIFTS ================= */
+    const shifts = await Shift.find({
+        restaurantId,
+        isActive: true
+    }).sort({ startTime: 1 });
+
+    if (!shifts.length) {
+        return {
+            restaurantId,
+            date: normalizedDate,
+            totalShifts: 0,
+            data: []
+        };
+    }
+
+    /* ================= BLOCK CHECK ================= */
+    const isSlotBlocked = (slotTime) => {
+        return blocks.some(block => {
+            if (!block.startTime || !block.endTime) return false;
+
+            let blockStart = moment.tz(
+                `${normalizedDate} ${block.startTime}`,
+                "YYYY-MM-DD HH:mm",
+                restaurantTimezone
+            );
+
+            let blockEnd = moment.tz(
+                `${normalizedDate} ${block.endTime}`,
+                "YYYY-MM-DD HH:mm",
+                restaurantTimezone
+            );
+
+            let slot = slotTime.clone();
+
+            /* Overnight block */
+            if (blockEnd.isSameOrBefore(blockStart)) {
+                blockEnd.add(1, "day");
+
+                if (slot.isBefore(blockStart)) {
+                    slot.add(1, "day");
+                }
+            }
+
+            return slot.isBetween(blockStart, blockEnd, null, "[)");
+        });
+    };
+
+    /* ================= SLOT GENERATION ================= */
+    let groupedSlots = [];
+
+    for (let shift of shifts) {
+        /* ================= SHIFT VALID ================= */
+        const isRecurringValid =
+            shift.type === "Recurring" &&
+            (!shift.daysActive?.length || shift.daysActive.includes(selectedDay)) &&
+            (!shift.startDate || !selectedDate.isBefore(moment(shift.startDate), "day")) &&
+            (shift.isIndefinite ||
+                !shift.endDate ||
+                !selectedDate.isAfter(moment(shift.endDate), "day"));
+
+        const isSpecialValid =
+            shift.type === "Special" &&
+            shift.startDate &&
+            !selectedDate.isBefore(moment(shift.startDate), "day") &&
+            (!shift.endDate ||
+                !selectedDate.isAfter(moment(shift.endDate), "day"));
+
+        if (!isRecurringValid && !isSpecialValid) continue;
+
+        /* ================= ADVANCE BOOKING ================= */
+        if (shift.advanceBookingWindow) {
+            const maxAllowedDate = now.clone().add(shift.advanceBookingWindow, "days");
+            if (selectedDate.isAfter(maxAllowedDate, "day")) continue;
+        }
+
+        /* ================= DURATION ================= */
+        let duration = shift.duration;
+
+        if (!shift.sameDurationForAll && shift.durationByPartySize?.length) {
+            const rule = shift.durationByPartySize.find(r => {
+                const [min, max] = r.range.split("-").map(Number);
+                return partySize >= min && partySize <= max;
+            });
+            if (rule) duration = rule.duration;
+        }
+
+        if (!duration) continue;
+
+        /* ================= TIME ================= */
+        let start = moment.tz(
+            `${normalizedDate} ${shift.startTime}`,
+            "YYYY-MM-DD HH:mm",
+            restaurantTimezone
+        );
+
+        let end = moment.tz(
+            `${normalizedDate} ${shift.endTime}`,
+            "YYYY-MM-DD HH:mm",
+            restaurantTimezone
+        );
+
+        /* Overnight shift */
+        if (end.isSameOrBefore(start)) {
+            end.add(1, "day");
+        }
+
+        // For TODAY, if the shift end has already passed, skip the entire shift
+        if (isToday && end.isBefore(now)) continue;
+
+        let shiftSlots = [];
+
+        while (
+            start.clone().add(duration + (shift.bufferTime || 0), "minutes")
+                .isSameOrBefore(end)
+        ) {
+            const slotTime = start.clone();
+            const slotStartTimeFormatted = slotTime.format("hh:mm A");
+
+            // Construct full datetime in the restaurant's timezone using slot time string
+            const slotDateTime = moment.tz(
+                `${normalizedDate} ${slotStartTimeFormatted}`,
+                "YYYY-MM-DD hh:mm A",
+                restaurantTimezone
+            );
+
+            // Print slot-level debug logging
+            console.log({
+                requestedDate: normalizedDate,
+                slotStartTime: slotStartTimeFormatted,
+                slotDateTime: slotDateTime.format("YYYY-MM-DD HH:mm:ss Z"),
+                now: now.format("YYYY-MM-DD HH:mm:ss Z"),
+                isPast: slotDateTime.isBefore(now),
+                isSameOrAfter: slotDateTime.isSameOrAfter(now)
+            });
+
+            /* Skip past (TODAY only) */
+            if (isToday && slotDateTime.isBefore(now)) {
+                start.add(shift.slotInterval, "minutes");
+                continue;
+            }
+
+            /* Lead time */
+            if (shift.leadTime) {
+                const minAllowedTime = now.clone().add(shift.leadTime, "minutes");
+
+                if (slotDateTime.isBefore(minAllowedTime)) {
+                    start.add(shift.slotInterval, "minutes");
+                    continue;
+                }
+            }
+
+            /* ❌ BLOCK CHECK */
+            if (isSlotBlocked(slotTime)) {
+                start.add(shift.slotInterval, "minutes");
+                continue;
+            }
+
+            /* SLOT */
+            shiftSlots.push({
+                startTime: slotStartTimeFormatted
+            });
+
+            start.add(shift.slotInterval, "minutes");
+        }
+
+        if (shiftSlots.length > 0) {
+            groupedSlots.push({
+                shiftId: shift._id,
+                shiftName: shift.name,
+                shiftType: shift.type,
+                slots: shiftSlots
+            });
+        }
+    }
+
+    return {
+        restaurantId,
+        date: normalizedDate,
+        totalShifts: groupedSlots.length,
+        data: groupedSlots
+    };
+}
 
 exports.getRestaurantSlots = async (req, res) => {
     try {
         const { restaurantId, date, partySize = 1 } = req.body;
-
-        /* ================= VALIDATION ================= */
 
         if (!restaurantId) {
             return res.status(400).json({
@@ -1425,236 +1684,33 @@ exports.getRestaurantSlots = async (req, res) => {
             });
         }
 
-        /* ================= DATE PARSE ================= */
-
-        const DATE_FORMATS = [
-            "YYYY-MM-DD",
-            "DD/MM/YYYY",
-            "MM/DD/YYYY",
-            "DD-MM-YYYY"
-        ];
-
-        const selectedDate = moment.tz(date, DATE_FORMATS, true, DEFAULT_TIMEZONE);
-
-        if (!selectedDate.isValid()) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid date format"
-            });
-        }
-
-        const normalizedDate = selectedDate.format("YYYY-MM-DD");
-        const now = moment.tz(DEFAULT_TIMEZONE);
-        const selectedDay = selectedDate.format("dd");
-
-        /* ================= BLOCK FETCH ================= */
-
-        const blocks = await Block.find({
+        const slotsData = await getAvailableSlotsByDateAndTimezone({
             restaurantId,
-            status: "Active",
-            isExpired: false,
-            startDate: { $lte: selectedDate.toDate() },
-            endDate: { $gte: selectedDate.toDate() }
+            date,
+            partySize
         });
-
-        /* ================= FULL DAY BLOCK ================= */
-
-        const hasFullDayBlock = blocks.some(b =>
-            b.isFullRestaurantBlock &&
-            !b.startTime &&
-            !b.endTime
-        );
-
-        if (hasFullDayBlock) {
-            return res.status(200).json({
-                success: true,
-                restaurantId,
-                date: normalizedDate,
-                totalShifts: 0,
-                data: []
-            });
-        }
-
-        /* ================= SHIFTS ================= */
-
-        const shifts = await Shift.find({
-            restaurantId,
-            isActive: true
-        }).sort({ startTime: 1 });
-
-        if (!shifts.length) {
-            return res.status(200).json({
-                success: true,
-                restaurantId,
-                date: normalizedDate,
-                totalShifts: 0,
-                data: []
-            });
-        }
-
-        /* ================= BLOCK CHECK ================= */
-
-        const isSlotBlocked = (slotTime) => {
-            return blocks.some(block => {
-
-                if (!block.startTime || !block.endTime) return false;
-
-                let blockStart = moment.tz(
-                    `${normalizedDate} ${block.startTime}`,
-                    "YYYY-MM-DD HH:mm",
-                    DEFAULT_TIMEZONE
-                );
-
-                let blockEnd = moment.tz(
-                    `${normalizedDate} ${block.endTime}`,
-                    "YYYY-MM-DD HH:mm",
-                    DEFAULT_TIMEZONE
-                );
-
-                let slot = slotTime.clone();
-
-                /* 🔥 Overnight block */
-                if (blockEnd.isSameOrBefore(blockStart)) {
-                    blockEnd.add(1, "day");
-
-                    if (slot.isBefore(blockStart)) {
-                        slot.add(1, "day");
-                    }
-                }
-
-                return slot.isBetween(blockStart, blockEnd, null, "[)");
-            });
-        };
-
-        /* ================= SLOT GENERATION ================= */
-
-        let groupedSlots = [];
-
-        for (let shift of shifts) {
-
-            /* ================= SHIFT VALID ================= */
-
-            const isRecurringValid =
-                shift.type === "Recurring" &&
-                (!shift.daysActive?.length || shift.daysActive.includes(selectedDay)) &&
-                (!shift.startDate || !selectedDate.isBefore(moment(shift.startDate), "day")) &&
-                (shift.isIndefinite ||
-                    !shift.endDate ||
-                    !selectedDate.isAfter(moment(shift.endDate), "day"));
-
-            const isSpecialValid =
-                shift.type === "Special" &&
-                shift.startDate &&
-                !selectedDate.isBefore(moment(shift.startDate), "day") &&
-                (!shift.endDate ||
-                    !selectedDate.isAfter(moment(shift.endDate), "day"));
-
-            if (!isRecurringValid && !isSpecialValid) continue;
-
-            /* ================= ADVANCE BOOKING ================= */
-
-            if (shift.advanceBookingWindow) {
-                const maxAllowedDate = now.clone().add(shift.advanceBookingWindow, "days");
-                if (selectedDate.isAfter(maxAllowedDate, "day")) continue;
-            }
-
-            /* ================= DURATION ================= */
-
-            let duration = shift.duration;
-
-            if (!shift.sameDurationForAll && shift.durationByPartySize?.length) {
-                const rule = shift.durationByPartySize.find(r => {
-                    const [min, max] = r.range.split("-").map(Number);
-                    return partySize >= min && partySize <= max;
-                });
-                if (rule) duration = rule.duration;
-            }
-
-            if (!duration) continue;
-
-            /* ================= TIME ================= */
-
-            let start = moment.tz(
-                `${normalizedDate} ${shift.startTime}`,
-                "YYYY-MM-DD HH:mm",
-                DEFAULT_TIMEZONE
-            );
-
-            let end = moment.tz(
-                `${normalizedDate} ${shift.endTime}`,
-                "YYYY-MM-DD HH:mm",
-                DEFAULT_TIMEZONE
-            );
-
-            /* 🔥 Overnight shift */
-            if (end.isSameOrBefore(start)) {
-                end.add(1, "day");
-            }
-
-            if (end.isBefore(now)) continue;
-
-            let shiftSlots = [];
-
-            while (
-                start.clone().add(duration + (shift.bufferTime || 0), "minutes")
-                    .isSameOrBefore(end)
-            ) {
-
-                const slotTime = start.clone();
-
-                /* Skip past */
-                if (slotTime.isBefore(now)) {
-                    start.add(shift.slotInterval, "minutes");
-                    continue;
-                }
-
-                /* Lead time */
-                if (shift.leadTime) {
-                    const minAllowedTime = now.clone().add(shift.leadTime, "minutes");
-
-                    if (slotTime.isBefore(minAllowedTime)) {
-                        start.add(shift.slotInterval, "minutes");
-                        continue;
-                    }
-                }
-
-                /* ❌ BLOCK CHECK */
-                if (isSlotBlocked(slotTime)) {
-                    start.add(shift.slotInterval, "minutes");
-                    continue;
-                }
-
-                /* SLOT */
-                shiftSlots.push({
-                    startTime: slotTime.format("hh:mm A"),
-                    // endTime: slotTime.clone().add(duration, "minutes").format("hh:mm A")
-                });
-
-                start.add(shift.slotInterval, "minutes");
-            }
-
-            if (shiftSlots.length > 0) {
-                groupedSlots.push({
-                    shiftId: shift._id,
-                    shiftName: shift.name,
-                    shiftType: shift.type,
-                    slots: shiftSlots
-                });
-            }
-        }
-
-        /* ================= RESPONSE ================= */
 
         return res.status(200).json({
             success: true,
-            restaurantId,
-            date: normalizedDate,
-            totalShifts: groupedSlots.length,
-            data: groupedSlots
+            ...slotsData
         });
 
     } catch (error) {
         console.error("Restaurant slot generation error:", error);
+
+        if (error.message === "Restaurant not found") {
+            return res.status(404).json({
+                success: false,
+                message: error.message
+            });
+        }
+
+        if (error.message === "Invalid date format") {
+            return res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
 
         return res.status(500).json({
             success: false,
@@ -1876,8 +1932,6 @@ exports.getWidgetRestaurantSlots = async (req, res) => {
         const { restaurantId } = req.params;
         const { date, partySize = 1 } = req.body;
 
-        /* ================= VALIDATION ================= */
-
         if (!restaurantId) {
             return res.status(400).json({
                 success: false,
@@ -1892,237 +1946,33 @@ exports.getWidgetRestaurantSlots = async (req, res) => {
             });
         }
 
-        /* ================= DATE PARSE ================= */
-
-        const DATE_FORMATS = [
-            "YYYY-MM-DD",
-            "DD/MM/YYYY",
-            "MM/DD/YYYY",
-            "DD-MM-YYYY"
-        ];
-
-        const selectedDate = moment.tz(date, DATE_FORMATS, true, DEFAULT_TIMEZONE);
-
-        if (!selectedDate.isValid()) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid date format"
-            });
-        }
-
-        const normalizedDate = selectedDate.format("YYYY-MM-DD");
-        const now = moment.tz(DEFAULT_TIMEZONE);
-        const selectedDay = selectedDate.format("dd");
-
-        /* ================= BLOCK FETCH ================= */
-
-        const blocks = await Block.find({
+        const slotsData = await getAvailableSlotsByDateAndTimezone({
             restaurantId,
-            status: "Active",
-            isExpired: false,
-            startDate: { $lte: selectedDate.toDate() },
-            endDate: { $gte: selectedDate.toDate() }
+            date,
+            partySize
         });
-
-        /* ================= FULL DAY BLOCK ================= */
-
-        const hasFullDayBlock = blocks.some(b =>
-            b.isFullRestaurantBlock &&
-            !b.startTime &&
-            !b.endTime
-        );
-
-        if (hasFullDayBlock) {
-            return res.status(200).json({
-                success: true,
-                restaurantId,
-                date: normalizedDate,
-                totalShifts: 0,
-                data: []
-            });
-        }
-
-        /* ================= SHIFTS ================= */
-
-        const shifts = await Shift.find({
-            restaurantId,
-            isActive: true
-        }).sort({ startTime: 1 });
-
-        if (!shifts.length) {
-            return res.status(200).json({
-                success: true,
-                restaurantId,
-                date: normalizedDate,
-                totalShifts: 0,
-                data: []
-            });
-        }
-
-        /* ================= BLOCK CHECK FUNCTION ================= */
-
-        const isSlotBlocked = (slotTime) => {
-            return blocks.some(block => {
-
-                // Only apply if time range exists
-                if (!block.startTime || !block.endTime) return false;
-
-                let blockStart = moment.tz(
-                    `${normalizedDate} ${block.startTime}`,
-                    "YYYY-MM-DD HH:mm",
-                    DEFAULT_TIMEZONE
-                );
-
-                let blockEnd = moment.tz(
-                    `${normalizedDate} ${block.endTime}`,
-                    "YYYY-MM-DD HH:mm",
-                    DEFAULT_TIMEZONE
-                );
-
-                let slot = slotTime.clone();
-
-                /* Overnight block */
-                if (blockEnd.isSameOrBefore(blockStart)) {
-                    blockEnd.add(1, "day");
-
-                    if (slot.isBefore(blockStart)) {
-                        slot.add(1, "day");
-                    }
-                }
-
-                return slot.isBetween(blockStart, blockEnd, null, "[)");
-            });
-        };
-
-        /* ================= SLOT GENERATION ================= */
-
-        let groupedSlots = [];
-
-        for (let shift of shifts) {
-
-            /* ================= SHIFT VALID ================= */
-
-            const isRecurringValid =
-                shift.type === "Recurring" &&
-                (!shift.daysActive?.length || shift.daysActive.includes(selectedDay)) &&
-                (!shift.startDate || !selectedDate.isBefore(moment(shift.startDate), "day")) &&
-                (shift.isIndefinite ||
-                    !shift.endDate ||
-                    !selectedDate.isAfter(moment(shift.endDate), "day"));
-
-            const isSpecialValid =
-                shift.type === "Special" &&
-                shift.startDate &&
-                !selectedDate.isBefore(moment(shift.startDate), "day") &&
-                (!shift.endDate ||
-                    !selectedDate.isAfter(moment(shift.endDate), "day"));
-
-            if (!isRecurringValid && !isSpecialValid) continue;
-
-            /* ================= ADVANCE BOOKING ================= */
-
-            if (shift.advanceBookingWindow) {
-                const maxAllowedDate = now.clone().add(shift.advanceBookingWindow, "days");
-                if (selectedDate.isAfter(maxAllowedDate, "day")) continue;
-            }
-
-            /* ================= DURATION ================= */
-
-            let duration = shift.duration;
-
-            if (!shift.sameDurationForAll && shift.durationByPartySize?.length) {
-                const rule = shift.durationByPartySize.find(r => {
-                    const [min, max] = r.range.split("-").map(Number);
-                    return partySize >= min && partySize <= max;
-                });
-                if (rule) duration = rule.duration;
-            }
-
-            if (!duration) continue;
-
-            /* ================= TIME ================= */
-
-            let start = moment.tz(
-                `${normalizedDate} ${shift.startTime}`,
-                "YYYY-MM-DD HH:mm",
-                DEFAULT_TIMEZONE
-            );
-
-            let end = moment.tz(
-                `${normalizedDate} ${shift.endTime}`,
-                "YYYY-MM-DD HH:mm",
-                DEFAULT_TIMEZONE
-            );
-
-            /* Overnight shift */
-            if (end.isSameOrBefore(start)) {
-                end.add(1, "day");
-            }
-
-            if (end.isBefore(now)) continue;
-
-            let shiftSlots = [];
-
-            while (
-                start.clone().add(duration + (shift.bufferTime || 0), "minutes")
-                    .isSameOrBefore(end)
-            ) {
-
-                const slotTime = start.clone();
-
-                /* Skip past */
-                if (slotTime.isBefore(now)) {
-                    start.add(shift.slotInterval, "minutes");
-                    continue;
-                }
-
-                /* Lead time */
-                if (shift.leadTime) {
-                    const minAllowedTime = now.clone().add(shift.leadTime, "minutes");
-
-                    if (slotTime.isBefore(minAllowedTime)) {
-                        start.add(shift.slotInterval, "minutes");
-                        continue;
-                    }
-                }
-
-                /* ❌ BLOCK CHECK (MAIN FIX) */
-                if (isSlotBlocked(slotTime)) {
-                    start.add(shift.slotInterval, "minutes");
-                    continue;
-                }
-
-                /* VALID SLOT */
-                shiftSlots.push({
-                    startTime: slotTime.format("hh:mm A"),
-                    // endTime: slotTime.clone().add(duration, "minutes").format("hh:mm A")
-                });
-
-                start.add(shift.slotInterval, "minutes");
-            }
-
-            if (shiftSlots.length > 0) {
-                groupedSlots.push({
-                    shiftId: shift._id,
-                    shiftName: shift.name,
-                    shiftType: shift.type,
-                    slots: shiftSlots
-                });
-            }
-        }
-
-        /* ================= RESPONSE ================= */
 
         return res.status(200).json({
             success: true,
-            restaurantId,
-            date: normalizedDate,
-            totalShifts: groupedSlots.length,
-            data: groupedSlots
+            ...slotsData
         });
 
     } catch (error) {
         console.error("Widget slot error:", error);
+
+        if (error.message === "Restaurant not found") {
+            return res.status(404).json({
+                success: false,
+                message: error.message
+            });
+        }
+
+        if (error.message === "Invalid date format") {
+            return res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
 
         return res.status(500).json({
             success: false,

@@ -178,7 +178,7 @@ exports.login = async (req, res) => {
             });
         }
 
-        const allowedRoles = ["Admin", "Host", "Manager", "Call Center"];
+        const allowedRoles = ["Admin", "Host", "Manager", "Call Center", "admin", "host", "manager", "call center", "call_center"];
 
         if (!allowedRoles.includes(user.role)) {
             return res.status(403).json({
@@ -330,6 +330,17 @@ exports.getProfile = async (req, res) => {
             });
         }
 
+        let targetTimezone = process.env.APP_TIMEZONE || "Asia/Kolkata";
+        if (user.restaurantId) {
+            const restaurant = await Restaurant.findById(user.restaurantId).select("timezone");
+            if (restaurant && restaurant.timezone) {
+                targetTimezone = restaurant.timezone;
+            }
+        }
+        const lastLogin = user.lastLogin
+            ? formatDateTime(user.lastLogin, targetTimezone)
+            : null;
+
         const imageUrl = user.profileImage ? user.profileImage : null;
 
         return res.status(200).json({
@@ -342,7 +353,7 @@ exports.getProfile = async (req, res) => {
                 phone: user.phone,
                 role: user.role,
                 isActive: user.isActive,
-                lastLogin: user.lastLogin,
+                lastLogin,
                 imageUrl
             }
         });

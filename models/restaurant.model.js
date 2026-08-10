@@ -151,6 +151,10 @@ const restaurantSchema = new mongoose.Schema(
         },
 
         menuLink: String,
+        timezone: {
+            type: String,
+            default: () => process.env.APP_TIMEZONE || "Asia/Kolkata"
+        },
         // openingHours: String,
 
         openingHours: {
