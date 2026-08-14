@@ -4,170 +4,252 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet" />
     <title>Booking Reminder</title>
 </head>
 
-<body style="margin: 0; padding: 0; background-color: #f3f4f8; font-family: 'Rubik', Arial, sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;">
+<body
+    style="margin: 0; padding: 0; background-color: #f3f4f8; font-family: 'Rubik', Arial, sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;">
 
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background-color: #f3f4f8; padding: 30px 15px;">
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation"
+        style="background-color: #f3f4f8; padding: 30px 15px;">
         <tr>
             <td align="center">
 
                 <!-- MAIN CARD CONTAINER -->
-                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="max-width: 600px; background-color: #ffffff; border-radius: 24px; border: 1px solid #e4e7ec; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05); overflow: hidden;">
+                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation"
+                    style="max-width: 600px; background-color: #ffffff; border-radius: 24px; border: 1px solid #e4e7ec; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05); overflow: hidden;">
                     <tr>
                         <td style="padding: 40px 30px;">
 
                             <!-- TOP TIMER ICON -->
-                            <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom: 12px; text-align: center;">
+                            <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation"
+                                style="margin-bottom: 12px; text-align: center;">
                                 <tr>
                                     <td align="center">
-                                        <div style="display: inline-block; width: 44px; height: 44px; line-height: 44px; border-radius: 50%; background-color: #E2F0F1; text-align: center; vertical-align: middle;">
-                                            <span style="color: #45818A; font-size: 20px; font-weight: bold; line-height: 44px; vertical-align: middle;">🕒</span>
+                                        <div
+                                            style="display: inline-block; width: 44px; height: 44px; line-height: 44px; border-radius: 50%; background-color: #E2F0F1; text-align: center; vertical-align: middle;">
+                                            <span
+                                                style="color: #45818A; font-size: 20px; font-weight: bold; line-height: 44px; vertical-align: middle;">🕒</span>
                                         </div>
                                     </td>
                                 </tr>
                             </table>
 
                             <!-- TITLE & SUBTITLE -->
-                            <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="text-align: center; margin-bottom: 25px;">
+                            <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation"
+                                style="text-align: center; margin-bottom: 25px;">
                                 <tr>
                                     <td align="center">
-                                        <h2 style="color: #45818A; font-size: 24px; font-weight: 500; margin: 0 0 5px 0;">Reservation Reminder</h2>
-                                        <p style="color: #6b7280; font-size: 14px; margin: 0;">Your reservation is coming up soon!</p>
+                                        <h2
+                                            style="color: #45818A; font-size: 24px; font-weight: 500; margin: 0 0 5px 0;">
+                                            Reservation Reminder</h2>
+                                        <p style="color: #6b7280; font-size: 14px; margin: 0;">Your reservation is
+                                            coming up soon!</p>
                                     </td>
                                 </tr>
                             </table>
 
                             <!-- RESTAURANT IMAGE -->
-                            <% if (typeof image !== 'undefined' && image) { %>
-                            <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom: 20px; text-align: center;">
-                                <tr>
-                                    <td align="center">
-                                        <img src="https://sisccltd.com/restaurant_reservation/uploads/restaurants/logo/<%= image %>" alt="<%= restaurantName %>" style="width: 100%; max-width: 540px; height: 220px; object-fit: cover; border-radius: 16px; display: block; border: 0;" />
-                                    </td>
-                                </tr>
-                            </table>
-                            <% } %>
+                            <% if (typeof image !=='undefined' && image) { %>
+                                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation"
+                                    style="margin-bottom: 20px; text-align: center;">
+                                    <tr>
+                                        <td align="center">
+                                            <img src="https://sisccltd.com/restaurant_reservation/uploads/restaurants/logo/<%= image %>"
+                                                alt="<%= restaurantName %>"
+                                                style="width: 100%; max-width: 540px; height: 220px; object-fit: cover; border-radius: 16px; display: block; border: 0;" />
+                                        </td>
+                                    </tr>
+                                </table>
+                                <% } %>
 
-                            <!-- RESERVATION DETAIL CARD -->
-                            <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="background-color: #f8fafb; border: 1px solid #f0f2f5; border-radius: 16px; padding: 25px; text-align: center; margin-bottom: 20px;">
-                                <tr>
-                                    <td align="center">
-                                        <h3 style="font-size: 22px; font-weight: 600; color: #111827; margin: 0 0 10px 0;"><%= restaurantName %></h3>
-                                        <p style="font-size: 15px; font-weight: 500; color: #111827; margin: 0 0 6px 0;"><%= date %></p>
-                                        <p style="font-size: 14px; color: #4B5563; margin: 0;">
-                                            <%= partySize %> guests &bull; <span style="color: #45818A; font-weight: 600;"><%= time %></span>
-                                        </p>
-                                        
-                                        <!-- OPTIONAL ADDITIONAL INFO -->
-                                        <% if ((typeof reservationNo !== 'undefined' && reservationNo) || (typeof tableNumbers !== 'undefined' && tableNumbers && tableNumbers !== '-')) { %>
-                                        <p style="font-size: 12px; color: #9CA3AF; margin: 8px 0 0 0;">
-                                            <% if (typeof reservationNo !== 'undefined' && reservationNo) { %>
-                                                Res. No: <%= reservationNo %>
-                                            <% } %>
-                                            <% if (typeof tableNumbers !== 'undefined' && tableNumbers && tableNumbers !== '-') { %>
-                                                <% if (typeof reservationNo !== 'undefined' && reservationNo) { %> &bull; <% } %>
-                                                Table: <%= tableNumbers %>
-                                                <% if (typeof floorNames !== 'undefined' && floorNames && floorNames !== '-') { %>
-                                                    (<%= floorNames %>)
-                                                <% } %>
-                                            <% } %>
-                                        </p>
-                                        <% } %>
-                                    </td>
-                                </tr>
-                            </table>
+                                    <!-- RESERVATION DETAIL CARD -->
+                                    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation"
+                                        style="background-color: #f8fafb; border: 1px solid #f0f2f5; border-radius: 16px; padding: 25px; text-align: center; margin-bottom: 20px;">
+                                        <tr>
+                                            <td align="center">
+                                                <h3
+                                                    style="font-size: 22px; font-weight: 600; color: #111827; margin: 0 0 10px 0;">
+                                                    <%= restaurantName %>
+                                                </h3>
+                                                <p
+                                                    style="font-size: 15px; font-weight: 500; color: #111827; margin: 0 0 6px 0;">
+                                                    <%= date %>
+                                                </p>
+                                                <p style="font-size: 14px; color: #4B5563; margin: 0;">
+                                                    <%= partySize %> guests &bull; <span
+                                                            style="color: #45818A; font-weight: 600;">
+                                                            <%= time %>
+                                                        </span>
+                                                </p>
 
-                            <!-- ACTION BUTTONS -->
-                            <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom: 25px;">
-                                <tr>
-                                    <td width="50%" align="right" style="padding-right: 8px;">
-                                        <a href="https://itdevelopmentservices.com/restaurants/modify-booking/<%= restaurantId %>/<%= reservationId %>" style="display: block; width: 100%; max-width: 220px; background-color: #E62727; color: #ffffff; border: 1px solid #E62727; border-radius: 20px; padding: 11px 0; text-decoration: none; font-size: 13px; font-weight: bold; text-align: center; float: right;">
-                                            <img src="https://itdevelopmentservices.com/design_website/REMI/assets/images/customerBookingFormIcon/customerBookingFormIcon15.png" alt="modify" style="margin-right: 5px; vertical-align: middle; border: 0;" />Modify Reservation
-                                        </a>
-                                    </td>
-                                    <td width="50%" align="left" style="padding-left: 8px;">
-                                        <a href="https://itdevelopmentservices.com/restaurants/booking-cancel/<%= reservationId %>" style="display: block; width: 100%; max-width: 220px; background-color: #ffffff; color: #E62727; border: 1px solid #E62727; border-radius: 20px; padding: 11px 0; text-decoration: none; font-size: 13px; font-weight: bold; text-align: center; float: left;">
-                                            <img src="https://itdevelopmentservices.com/design_website/REMI/assets/images/customerBookingFormIcon/customerBookingFormIcon16.png" alt="cancel" style="margin-right: 5px; vertical-align: middle; border: 0;" />Cancel reservation
-                                        </a>
-                                    </td>
-                                </tr>
-                            </table>
+                                                <!-- OPTIONAL ADDITIONAL INFO -->
+                                                <% if ((typeof reservationNo !=='undefined' && reservationNo) || (typeof
+                                                    tableNumbers !=='undefined' && tableNumbers && tableNumbers !=='-'
+                                                    )) { %>
+                                                    <p style="font-size: 12px; color: #9CA3AF; margin: 8px 0 0 0;">
+                                                        <% if (typeof reservationNo !=='undefined' && reservationNo) {
+                                                            %>
+                                                            Res. No: <%= reservationNo %>
+                                                                <% } %>
+                                                                    <% if (typeof tableNumbers !=='undefined' &&
+                                                                        tableNumbers && tableNumbers !=='-' ) { %>
+                                                                        <% if (typeof reservationNo !=='undefined' &&
+                                                                            reservationNo) { %> &bull; <% } %>
+                                                                                Table: <%= tableNumbers %>
+                                                                                    <% if (typeof floorNames
+                                                                                        !=='undefined' && floorNames &&
+                                                                                        floorNames !=='-' ) { %>
+                                                                                        (<%= floorNames %>)
+                                                                                            <% } %>
+                                                                                                <% } %>
+                                                    </p>
+                                                    <% } %>
+                                            </td>
+                                        </tr>
+                                    </table>
 
-                            <!-- CONTACT BLOCK -->
-                            <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="border: 1px solid #E5E7EB; border-radius: 16px; padding: 25px; margin-bottom: 25px; text-align: center;">
-                                <tr>
-                                    <td align="center">
-                                        <h4 style="font-size: 15px; font-weight: bold; color: #374151; margin: 0 0 10px 0; text-transform: none; font-family: 'Rubik', Arial, sans-serif;">Contact</h4>
-                                        
-                                        <% if (typeof restaurantAddress !== 'undefined' && restaurantAddress) { %>
-                                            <p style="font-size: 13px; color: #4B5563; margin: 0 0 5px 0;"><%= restaurantAddress %></p>
-                                        <% } else if (typeof city !== 'undefined' && city) { %>
-                                            <p style="font-size: 13px; color: #4B5563; margin: 0 0 5px 0;"><%= city %></p>
-                                        <% } %>
-                                        
-                                        <% if (typeof restaurantPhone !== 'undefined' && restaurantPhone) { %>
-                                            <p style="font-size: 13px; color: #4B5563; margin: 0 0 15px 0;"><%= restaurantPhone %></p>
-                                        <% } %>
+                                    <!-- ACTION BUTTONS -->
+                                    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation"
+                                        style="margin-bottom: 25px;">
+                                        <tr>
+                                            <td width="50%" align="right" style="padding-right: 8px;">
+                                                <a href="https://itdevelopmentservices.com/restaurants/modify-booking/<%= restaurantId %>/<%= reservationId %>"
+                                                    style="display: block; width: 100%; max-width: 220px; background-color: #E62727; color: #ffffff; border: 1px solid #E62727; border-radius: 20px; padding: 11px 0; text-decoration: none; font-size: 13px; font-weight: bold; text-align: center; float: right;">
+                                                    <span
+                                                        style="font-size: 13px; vertical-align: middle; margin-right: 4px;"></span>Modify
+                                                    Reservation
+                                                </a>
+                                            </td>
+                                            <td width="50%" align="left" style="padding-left: 8px;">
+                                                <a href="https://itdevelopmentservices.com/restaurants/booking-cancel/<%= reservationId %>"
+                                                    style="display: block; width: 100%; max-width: 220px; background-color: #ffffff; color: #E62727; border: 1px solid #E62727; border-radius: 20px; padding: 11px 0; text-decoration: none; font-size: 13px; font-weight: bold; text-align: center; float: left;">
+                                                    <span
+                                                        style="font-size: 13px; vertical-align: middle; margin-right: 4px;">❌</span>Cancel
+                                                    reservation
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    </table>
 
-                                        <table border="0" cellpadding="0" cellspacing="0" role="presentation" align="center" style="margin: auto;">
-                                            <tr>
-                                                <td style="padding-right: 15px;">
-                                                    <a href="https://www.google.com/maps/search/?api=1&query=<%= encodeURIComponent(restaurantName + ' ' + (typeof restaurantAddress !== 'undefined' && restaurantAddress ? restaurantAddress : city)) %>" target="_blank" style="color: #45818A; text-decoration: none; font-size: 13px; font-weight: 550; display: inline-block; font-family: 'Rubik', Arial, sans-serif;">
-                                                        🗺️ view restaurant on map
-                                                    </a>
-                                                </td>
-                                                <td style="padding-left: 15px; border-left: 1px solid #E5E7EB;">
-                                                    <a href="https://itdevelopmentservices.com/design_website/REMI/login.html" target="_blank" style="color: #45818A; text-decoration: none; font-size: 13px; font-weight: 550; display: inline-block; font-family: 'Rubik', Arial, sans-serif;">
-                                                        🌐 open website
-                                                    </a>
-                                                </td>
-                                            </tr>
-                                        </table>
-                                    </td>
-                                </tr>
-                            </table>
+                                    <!-- CONTACT BLOCK -->
+                                    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation"
+                                        style="border: 1px solid #E5E7EB; border-radius: 16px; padding: 25px; margin-bottom: 25px; text-align: center;">
+                                        <tr>
+                                            <td align="center">
+                                                <h4
+                                                    style="font-size: 15px; font-weight: bold; color: #374151; margin: 0 0 10px 0; text-transform: none; font-family: 'Rubik', Arial, sans-serif;">
+                                                    Contact</h4>
 
-                            <!-- POLICIES / NOTE BLOCK -->
-                            <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="border: 1px solid #E5E7EB; border-radius: 16px; padding: 25px; text-align: center;">
-                                <tr>
-                                    <td align="center">
-                                        <h4 style="font-size: 16px; font-weight: bold; color: #111827; margin: 0 0 12px 0; font-family: 'Rubik', Arial, sans-serif;">A note from us</h4>
-                                        <p style="font-size: 13px; font-weight: bold; color: #111827; margin: 0 0 15px 0; font-family: 'Rubik', Arial, sans-serif;">Kindly be aware of our policies:</p>
-                                        
-                                        <p style="font-size: 13px; color: #4B5563; line-height: 1.6; margin: 0 0 20px 0; font-family: 'Rubik', Arial, sans-serif;">
-                                            We will do our best to accommodate all requests for preferred tables and areas; however, this cannot be guaranteed and is assessed upon availability.
-                                        </p>
+                                                <% if (typeof restaurantAddress !=='undefined' && restaurantAddress) {
+                                                    %>
+                                                    <p style="font-size: 13px; color: #4B5563; margin: 0 0 5px 0;">
+                                                        <%= restaurantAddress %>
+                                                    </p>
+                                                    <% } else if (typeof city !=='undefined' && city) { %>
+                                                        <p style="font-size: 13px; color: #4B5563; margin: 0 0 5px 0;">
+                                                            <%= city %>
+                                                        </p>
+                                                        <% } %>
 
-                                        <h5 style="font-size: 13px; font-weight: bold; color: #111827; margin: 0 0 4px 0; font-family: 'Rubik', Arial, sans-serif;">Dress Code</h5>
-                                        <p style="font-size: 12px; color: #4B5563; line-height: 1.6; margin: 0 0 20px 0; font-family: 'Rubik', Arial, sans-serif;">
-                                            Restaurant: Smart Casual. Traditional attire Abaya &amp; Gandoura are welcome.
-                                        </p>
+                                                            <% if (typeof restaurantPhone !=='undefined' &&
+                                                                restaurantPhone) { %>
+                                                                <p
+                                                                    style="font-size: 13px; color: #4B5563; margin: 0 0 15px 0;">
+                                                                    <%= restaurantPhone %>
+                                                                </p>
+                                                                <% } %>
 
-                                        <h5 style="font-size: 13px; font-weight: bold; color: #111827; margin: 0 0 4px 0; font-family: 'Rubik', Arial, sans-serif;">Age Policy</h5>
-                                        <p style="font-size: 12px; color: #4B5563; line-height: 1.6; margin: 0 0 20px 0; font-family: 'Rubik', Arial, sans-serif;">
-                                            All ages are welcome.
-                                        </p>
+                                                                    <table border="0" cellpadding="0" cellspacing="0"
+                                                                        role="presentation" align="center"
+                                                                        style="margin: auto;">
+                                                                        <tr>
+                                                                            <td style="padding-right: 15px;">
+                                                                                <a href="https://www.google.com/maps/search/?api=1&query=<%= encodeURIComponent(restaurantName + ' ' + (typeof restaurantAddress !== 'undefined' && restaurantAddress ? restaurantAddress : city)) %>"
+                                                                                    target="_blank"
+                                                                                    style="color: #45818A; text-decoration: none; font-size: 13px; font-weight: 550; display: inline-block; font-family: 'Rubik', Arial, sans-serif;">
+                                                                                    🗺️ view restaurant on map
+                                                                                </a>
+                                                                            </td>
+                                                                            <td
+                                                                                style="padding-left: 15px; border-left: 1px solid #E5E7EB;">
+                                                                                <a href="https://itdevelopmentservices.com/design_website/REMI/login.html"
+                                                                                    target="_blank"
+                                                                                    style="color: #45818A; text-decoration: none; font-size: 13px; font-weight: 550; display: inline-block; font-family: 'Rubik', Arial, sans-serif;">
+                                                                                    🌐 open website
+                                                                                </a>
+                                                                            </td>
+                                                                        </tr>
+                                                                    </table>
+                                            </td>
+                                        </tr>
+                                    </table>
 
-                                        <h5 style="font-size: 13px; font-weight: bold; color: #111827; margin: 0 0 4px 0; font-family: 'Rubik', Arial, sans-serif;">Holding Time</h5>
-                                        <p style="font-size: 12px; color: #4B5563; line-height: 1.6; margin: 0; font-family: 'Rubik', Arial, sans-serif;">
-                                            Reservations are held for a maximum of 15 minutes. After this grace period, seating is subject to availability. In case you are running late, kindly give us a call; we will try our best to accommodate you upon arrival.
-                                        </p>
-                                    </td>
-                                </tr>
-                            </table>
+                                    <!-- POLICIES / NOTE BLOCK -->
+                                    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation"
+                                        style="border: 1px solid #E5E7EB; border-radius: 16px; padding: 25px; text-align: center;">
+                                        <tr>
+                                            <td align="center">
+                                                <h4
+                                                    style="font-size: 16px; font-weight: bold; color: #111827; margin: 0 0 12px 0; font-family: 'Rubik', Arial, sans-serif;">
+                                                    A note from us</h4>
+                                                <p
+                                                    style="font-size: 13px; font-weight: bold; color: #111827; margin: 0 0 15px 0; font-family: 'Rubik', Arial, sans-serif;">
+                                                    Kindly be aware of our policies:</p>
+
+                                                <p
+                                                    style="font-size: 13px; color: #4B5563; line-height: 1.6; margin: 0 0 20px 0; font-family: 'Rubik', Arial, sans-serif;">
+                                                    We will do our best to accommodate all requests for preferred tables
+                                                    and areas; however, this cannot be guaranteed and is assessed upon
+                                                    availability.
+                                                </p>
+
+                                                <h5
+                                                    style="font-size: 13px; font-weight: bold; color: #111827; margin: 0 0 4px 0; font-family: 'Rubik', Arial, sans-serif;">
+                                                    Dress Code</h5>
+                                                <p
+                                                    style="font-size: 12px; color: #4B5563; line-height: 1.6; margin: 0 0 20px 0; font-family: 'Rubik', Arial, sans-serif;">
+                                                    Restaurant: Smart Casual. Traditional attire Abaya &amp; Gandoura
+                                                    are welcome.
+                                                </p>
+
+                                                <h5
+                                                    style="font-size: 13px; font-weight: bold; color: #111827; margin: 0 0 4px 0; font-family: 'Rubik', Arial, sans-serif;">
+                                                    Age Policy</h5>
+                                                <p
+                                                    style="font-size: 12px; color: #4B5563; line-height: 1.6; margin: 0 0 20px 0; font-family: 'Rubik', Arial, sans-serif;">
+                                                    All ages are welcome.
+                                                </p>
+
+                                                <h5
+                                                    style="font-size: 13px; font-weight: bold; color: #111827; margin: 0 0 4px 0; font-family: 'Rubik', Arial, sans-serif;">
+                                                    Holding Time</h5>
+                                                <p
+                                                    style="font-size: 12px; color: #4B5563; line-height: 1.6; margin: 0; font-family: 'Rubik', Arial, sans-serif;">
+                                                    Reservations are held for a maximum of 15 minutes. After this grace
+                                                    period, seating is subject to availability. In case you are running
+                                                    late, kindly give us a call; we will try our best to accommodate you
+                                                    upon arrival.
+                                                </p>
+                                            </td>
+                                        </tr>
+                                    </table>
 
                         </td>
                     </tr>
                 </table>
 
                 <!-- FOOTER -->
-                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="max-width: 600px; margin-top: 20px; text-align: center;">
+                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation"
+                    style="max-width: 600px; margin-top: 20px; text-align: center;">
                     <tr>
-                        <td align="center" style="font-size: 12px; color: #9CA3AF; font-family: 'Rubik', Arial, sans-serif;">
-                            Powered by <img src="https://itdevelopmentservices.com/design_website/REMI/assets/images/logo/LoginLogo.png" style="width: 50px; vertical-align: middle; margin-left: 2px; border: 0;" alt="REMI" />
+                        <td align="center"
+                            style="font-size: 12px; color: #9CA3AF; font-family: 'Rubik', Arial, sans-serif;">
+                            Powered by <img
+                                src="https://itdevelopmentservices.com/design_website/REMI/assets/images/logo/LoginLogo.png"
+                                style="width: 50px; vertical-align: middle; margin-left: 2px; border: 0;" alt="REMI" />
                         </td>
                     </tr>
                 </table>
