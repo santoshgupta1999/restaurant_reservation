@@ -2,6 +2,7 @@ const express = require("express");
 const {
     register,
     login,
+    refreshToken,
     getProfile,
     updateProfile,
     changePassword,
@@ -37,6 +38,8 @@ const router = express.Router();
 
 router.post("/signup", registerValidator, validate, register);
 router.post("/login", loginValidator, validate, login);
+router.post("/refresh-token", refreshToken);
+router.post("/refreshToken", refreshToken);
 router.post("/super-admin/login", loginValidator, validate, superAdminLogin);
 router.get('/profile', verifyToken, getProfile);
 router.post('/profile', upload.single('profile'), verifyToken,

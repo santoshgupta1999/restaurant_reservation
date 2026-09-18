@@ -166,6 +166,31 @@ exports.register = async (req, res) => {
     }
 };
 
+const generateAccessToken = (user) => {
+    return jwt.sign(
+        {
+            id: user._id,
+            role: user.role,
+            restaurantId: user.restaurantId || null,
+        },
+        process.env.JWT_SECRET || "MY_SUPER_SECRET_KEY",
+        { expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || process.env.JWT_EXPIRES_IN || "1d" }
+    );
+};
+
+const generateRefreshToken = (user) => {
+    return jwt.sign(
+        {
+            id: user._id,
+            role: user.role,
+            restaurantId: user.restaurantId || null,
+            tokenType: "refresh",
+        },
+        process.env.JWT_REFRESH_SECRET || (process.env.JWT_SECRET ? process.env.JWT_SECRET + "_refresh" : "MY_SUPER_SECRET_REFRESH_KEY"),
+        { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "30d" }
+    );
+};
+
 exports.login = async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -209,20 +234,15 @@ exports.login = async (req, res) => {
 
         const permissions = roleData?.permissions || [];
 
-        const token = jwt.sign(
-            {
-                id: user._id,
-                role: user.role,
-                restaurantId: user.restaurantId || null,
-            },
-            process.env.JWT_SECRET || "MY_SUPER_SECRET_KEY",
-            { expiresIn: "30d" }
-        );
+        const token = generateAccessToken(user);
+        const refreshToken = generateRefreshToken(user);
 
         return res.status(200).json({
             success: true,
             message: "Login successfully",
             token,
+            accessToken: token,
+            refreshToken,
             data: {
                 id: user._id,
                 name: user.name,
@@ -235,6 +255,122 @@ exports.login = async (req, res) => {
 
     } catch (error) {
         console.error("Login Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+            error: error.message,
+        });
+    }
+};
+
+exports.refreshToken = async (req, res) => {
+    try {
+        const refreshToken =
+            req.body?.refreshToken ||
+            req.body?.token ||
+            req.headers?.["x-refresh-token"] ||
+            (req.headers?.authorization && req.headers.authorization.startsWith("Bearer ")
+                ? req.headers.authorization.split(" ")[1]
+                : null);
+
+        if (!refreshToken) {
+            return res.status(400).json({
+                success: false,
+                message: "Refresh token is required.",
+            });
+        }
+
+        const refreshSecret =
+            process.env.JWT_REFRESH_SECRET ||
+            (process.env.JWT_SECRET ? process.env.JWT_SECRET + "_refresh" : "MY_SUPER_SECRET_REFRESH_KEY");
+
+        let decoded;
+        try {
+            decoded = jwt.verify(refreshToken, refreshSecret);
+        } catch (err) {
+            if (process.env.JWT_SECRET && refreshSecret !== process.env.JWT_SECRET) {
+                try {
+                    decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+                } catch (fallbackErr) {
+                    if (err.name === "TokenExpiredError" || fallbackErr.name === "TokenExpiredError") {
+                        return res.status(401).json({
+                            success: false,
+                            message: "Refresh token has expired. Please login again.",
+                        });
+                    }
+                    return res.status(401).json({
+                        success: false,
+                        message: "Invalid refresh token.",
+                    });
+                }
+            } else {
+                if (err.name === "TokenExpiredError") {
+                    return res.status(401).json({
+                        success: false,
+                        message: "Refresh token has expired. Please login again.",
+                    });
+                }
+                return res.status(401).json({
+                    success: false,
+                    message: "Invalid refresh token.",
+                });
+            }
+        }
+
+        const userId = decoded.id || decoded.userId;
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid token payload.",
+            });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found.",
+            });
+        }
+
+        if (!user.isActive) {
+            return res.status(403).json({
+                success: false,
+                message: "Account is inactive. Contact admin.",
+            });
+        }
+
+        const allowedRoles = ["Admin", "Host", "Manager", "Call Center", "admin", "host", "manager", "call center", "call_center", "super_admin"];
+        if (user.role && !allowedRoles.includes(user.role)) {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied.",
+            });
+        }
+
+        const roleData = await RolePermission.findOne({ role: user.role });
+        const permissions = roleData?.permissions || [];
+
+        const newAccessToken = generateAccessToken(user);
+        const newRefreshToken = generateRefreshToken(user);
+
+        return res.status(200).json({
+            success: true,
+            message: "Token refreshed successfully",
+            token: newAccessToken,
+            accessToken: newAccessToken,
+            refreshToken: newRefreshToken,
+            data: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                restaurantId: user.restaurantId || null,
+                permissions,
+            },
+        });
+    } catch (error) {
+        console.error("Refresh Token Error:", error);
         return res.status(500).json({
             success: false,
             message: "Internal Server Error",
@@ -281,19 +417,15 @@ exports.superAdminLogin = async (req, res) => {
         user.lastLogin = new Date();
         await user.save();
 
-        const token = jwt.sign(
-            {
-                id: user._id,
-                role: user.role,
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: "30d" }
-        );
+        const token = generateAccessToken(user);
+        const refreshToken = generateRefreshToken(user);
 
         return res.status(200).json({
             success: true,
             message: "Login successfully",
             token,
+            accessToken: token,
+            refreshToken,
             data: {
                 id: user._id,
                 name: user.name,
