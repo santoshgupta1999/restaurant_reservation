@@ -2324,7 +2324,7 @@ exports.getAvailableTable = async (req, res) => {
             status: "Available",
             capacity: { $gte: partySize }
         })
-            .select("_id tableNumber capacity roomId")
+            .select("_id tableNumber capacity roomId joinedWith")
             .populate("roomId", "name");
 
         if (!tables.length) {
@@ -2396,35 +2396,89 @@ exports.getAvailableTable = async (req, res) => {
 
         /* ================= RESERVATION CHECK ================= */
 
+        const dateStr = selectedDate.format("YYYY-MM-DD");
+        const startOfDay = new Date(Math.min(
+            selectedDate.clone().startOf("day").toDate().getTime(),
+            moment.utc(dateStr).startOf("day").toDate().getTime()
+        ));
+        const endOfDay = new Date(Math.max(
+            selectedDate.clone().endOf("day").toDate().getTime(),
+            moment.utc(dateStr).endOf("day").toDate().getTime()
+        ));
+
         const reservations = await Reservation.find({
             restaurantId,
             date: {
-                $gte: selectedDate.startOf("day").toDate(),
-                $lte: selectedDate.endOf("day").toDate()
+                $gte: startOfDay,
+                $lte: endOfDay
             },
-            status: { $in: ["Pending", "Confirmed", "Seated"] }
-        }).select("tableId time");
+            status: { $nin: ["Cancelled", "Finished", "No-Show"] }
+        })
+            .populate("shiftId", "duration sameDurationForAll durationByPartySize")
+            .select("tableIds time partySize shiftId");
 
+        let requestedDuration = 120;
+        if (validShift) {
+            if (validShift.sameDurationForAll && validShift.duration) {
+                requestedDuration = validShift.duration;
+            } else if (!validShift.sameDurationForAll && validShift.durationByPartySize?.length) {
+                const rule = validShift.durationByPartySize.find(tier => {
+                    const [min, max] = tier.range.split("-").map(Number);
+                    return Number(partySize) >= min && Number(partySize) <= max;
+                });
+                if (rule?.duration) requestedDuration = rule.duration;
+                else if (validShift.duration) requestedDuration = validShift.duration;
+            }
+        }
+
+        const slotEndMinutes = slotMinutes + requestedDuration;
         let reservedTableIds = new Set();
 
         for (const r of reservations) {
+            if (!r.time) continue;
+            const rTime24 = moment(r.time, ["HH:mm", "H:mm", "hh:mm A", "h:mm A"]).format("HH:mm");
+            const rStartMin = convertToMinutes(rTime24);
 
-            if (!r.tableId) continue; // 🔥 FIX
+            let rDuration = 120;
+            if (r.shiftId) {
+                if (r.shiftId.sameDurationForAll && r.shiftId.duration) {
+                    rDuration = r.shiftId.duration;
+                } else if (!r.shiftId.sameDurationForAll && r.shiftId.durationByPartySize?.length) {
+                    const rule = r.shiftId.durationByPartySize.find(tier => {
+                        const [min, max] = tier.range.split("-").map(Number);
+                        return (r.partySize || 1) >= min && (r.partySize || 1) <= max;
+                    });
+                    if (rule?.duration) rDuration = rule.duration;
+                    else if (r.shiftId.duration) rDuration = r.shiftId.duration;
+                }
+            }
+            const rEndMin = rStartMin + rDuration;
 
-            const resTime = moment(r.time, "HH:mm").format("HH:mm");
-
-            if (resTime === slotTime) {
-                reservedTableIds.add(r.tableId.toString());
+            // Overlap check
+            if (slotMinutes < rEndMin && rStartMin < slotEndMinutes) {
+                if (Array.isArray(r.tableIds)) {
+                    r.tableIds.forEach(id => reservedTableIds.add(id.toString()));
+                }
             }
         }
 
         /* ================= FINAL FILTER ================= */
 
-        const availableTables = tables.filter(t =>
-            t?._id &&
-            !blockedTableIds.has(t._id.toString()) &&
-            !reservedTableIds.has(t._id.toString())
-        );
+        const availableTables = tables.filter(t => {
+            if (!t?._id) return false;
+            const tId = t._id.toString();
+            if (blockedTableIds.has(tId) || reservedTableIds.has(tId)) return false;
+
+            // Merged table check
+            if (Array.isArray(t.joinedWith) && t.joinedWith.length) {
+                const isJoinedUnavailable = t.joinedWith.some(jwId =>
+                    blockedTableIds.has(jwId.toString()) || reservedTableIds.has(jwId.toString())
+                );
+                if (isJoinedUnavailable) return false;
+            }
+
+            return true;
+        });
 
         /* ================= GROUP BY ROOM ================= */
 

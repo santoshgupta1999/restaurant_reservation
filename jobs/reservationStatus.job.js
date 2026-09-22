@@ -4,13 +4,19 @@ const moment = require("moment-timezone");
 const Reservation = require("../models/reservation.model");
 const Table = require("../models/table.model");
 
-cron.schedule("*/5 * * * *", async () => {
+/**
+ * Runs every minute to check reservation statuses with a 5-minute grace period
+ */
+cron.schedule("* * * * *", async () => {
 
     try {
 
         const reservations = await Reservation.find({
             status: {
                 $in: ["Pending", "Confirmed", "Upcoming"]
+            },
+            date: {
+                $lte: moment().add(2, "days").endOf("day").toDate()
             }
         })
             .populate("restaurantId", "timezone")
@@ -30,25 +36,47 @@ cron.schedule("*/5 * * * *", async () => {
             // CURRENT TIME IN VENUE TIMEZONE
             const now = moment().tz(timezone);
 
-            // BOOKING DATETIME
+            const timeClean = reservation.time ? String(reservation.time).trim() : "";
+            // Use venue timezone so that legacy records (stored at 18:30 UTC for IST)
+            // as well as new records (stored at 00:00 UTC) both correctly resolve to the booking date (e.g. 2026-09-22)
+            const dateStr = moment.tz(reservation.date, timezone).format("YYYY-MM-DD");
+
+            // BOOKING DATETIME (supports both 12H "hh:mm A" and 24H "HH:mm")
             const bookingDateTime = moment.tz(
-                `${moment(reservation.date).format("YYYY-MM-DD")} ${reservation.time}`,
-                "YYYY-MM-DD HH:mm",
+                `${dateStr} ${timeClean}`,
+                [
+                    "YYYY-MM-DD HH:mm",
+                    "YYYY-MM-DD H:mm",
+                    "YYYY-MM-DD hh:mm A",
+                    "YYYY-MM-DD h:mm A",
+                    "YYYY-MM-DD hh:mma",
+                    "YYYY-MM-DD h:mma"
+                ],
                 timezone
             );
 
-            // 2 HOURS BEFORE
+            if (!bookingDateTime.isValid()) {
+                continue;
+            }
+
+            // 2 HOURS BEFORE BOOKING TIME
             const upcomingTime = bookingDateTime
                 .clone()
                 .subtract(2, "hours");
 
+            // 5 MINUTES AFTER BOOKING START TIME -> NO-SHOW THRESHOLD
+            const noShowThreshold = bookingDateTime
+                .clone()
+                .add(5, "minutes");
+
             /*
                 CASE 1:
                 Pending/Confirmed -> Upcoming
+                (between 2 hours before booking and 5-minute grace period)
             */
             if (
                 now.isSameOrAfter(upcomingTime) &&
-                now.isBefore(bookingDateTime) &&
+                now.isBefore(noShowThreshold) &&
                 ["Pending", "Confirmed"].includes(reservation.status)
             ) {
                 upcomingIds.push(reservation._id);
@@ -56,10 +84,11 @@ cron.schedule("*/5 * * * *", async () => {
 
             /*
                 CASE 2:
-                Booking time passed -> No-Show
+                5 minutes passed after booking start time -> No-Show
+                (e.g., 2:00 PM booking automatically becomes No-Show at 2:05 PM)
             */
             if (
-                now.isSameOrAfter(bookingDateTime) &&
+                now.isSameOrAfter(noShowThreshold) &&
                 ["Pending", "Confirmed", "Upcoming"].includes(
                     reservation.status
                 )
@@ -67,7 +96,7 @@ cron.schedule("*/5 * * * *", async () => {
 
                 noShowIds.push(reservation._id);
 
-                // MULTI TABLE SUPPORT
+                // MULTI TABLE SUPPORT: Free tables
                 if (
                     reservation.tableIds &&
                     reservation.tableIds.length
@@ -126,7 +155,7 @@ cron.schedule("*/5 * * * *", async () => {
             }
 
             console.log(
-                `${noShowIds.length} reservations moved to No-Show`
+                `${noShowIds.length} reservations moved to No-Show (after 5-minute grace period)`
             );
         }
 

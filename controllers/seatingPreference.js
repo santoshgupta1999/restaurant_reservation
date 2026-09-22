@@ -6,7 +6,11 @@ const mongoose = require("mongoose");
 const Table = require("../models/table.model");
 const Reservation = require("../models/reservation.model");
 const Guest = require("../models/guest.model");
-const moment = require("moment");
+const Restaurant = require("../models/Restaurant.model");
+const Shift = require("../models/shift.model");
+const Block = require("../models/block.model");
+const ReservationHold = require("../models/reservationHold.model");
+const moment = require("moment-timezone");
 const {
     formatDate,
     formatTime
@@ -1007,6 +1011,37 @@ exports.getRoomsByRestaurant = async (req, res) => {
 
 const DEFAULT_TIMEZONE = process.env.APP_TIMEZONE || "Asia/Kolkata";
 
+function convertTo24Hour(time) {
+    if (!time) return time;
+    const cleanTime = String(time).trim();
+    const m = moment(cleanTime, ["hh:mm A", "h:mm A", "HH:mm", "H:mm", "hh:mma", "h:mma", "hh:mm a", "h:mm a"], true);
+    if (m.isValid()) {
+        return m.format("HH:mm");
+    }
+    const match = cleanTime.match(/^(\d{1,2}):(\d{2})(?:\s*([ap]m))?$/i);
+    if (match) {
+        let [_, h, minutes, modifier] = match;
+        let hours = parseInt(h, 10);
+        if (modifier) {
+            modifier = modifier.toUpperCase();
+            if (modifier === "PM" && hours !== 12) hours += 12;
+            if (modifier === "AM" && hours === 12) hours = 0;
+        }
+        return `${hours.toString().padStart(2, "0")}:${minutes}`;
+    }
+    return cleanTime;
+}
+
+function convertTo12Hour(time) {
+    if (!time) return time;
+    const cleanTime = String(time).trim();
+    const m = moment(cleanTime, ["HH:mm", "H:mm", "hh:mm A", "h:mm A"], true);
+    if (m.isValid()) {
+        return m.format("hh:mm A");
+    }
+    return cleanTime;
+}
+
 exports.getSeatingPrefrencesName = async (req, res) => {
     try {
         const { restaurantId, date, time } = req.body;
@@ -1445,116 +1480,245 @@ exports.getAvailableTablesByPreference = async (req, res) => {
         /* ================= FETCH TABLES ================= */
 
         const allTables = await Table.find({
-
             _id: {
                 $in: preference.tableIds
             },
-
             status: {
                 $ne: "OutOfService"
             },
-
             capacity: {
                 $gte: Number(partySize)
             }
-
         })
-            .select(
-                "_id tableNumber capacity displayName shape status"
-            )
+            .select("_id tableNumber capacity displayName shape status joinedWith roomId")
+            .populate("roomId", "name")
             .lean();
 
         if (!allTables.length) {
-            return res.status(404).json({
-                success: false,
-                message:
-                    "No active tables available for this preference or party size"
+            return res.status(200).json({
+                success: true,
+                message: "No active tables available for this preference or party size",
+                selectedDate: formattedDate,
+                selectedTime: formattedTime,
+                requestedPartySize: Number(partySize),
+                totalTables: 0,
+                bookedTables: 0,
+                availableCount: 0,
+                data: []
             });
         }
 
-        /* ================= FIND BOOKED TABLES ================= */
+        /* ================= TIMEZONE & DAY RANGE ================= */
 
-        const bookedReservations =
-            await Reservation.find({
+        const restaurant = await Restaurant.findById(preference.restaurantId).select("timezone").lean();
+        const timezone = restaurant?.timezone || DEFAULT_TIMEZONE;
 
-                date: {
-                    $gte: new Date(
-                        `${formattedDate}T00:00:00.000Z`
-                    ),
+        const tzStart = selectedDate.clone().tz(timezone).startOf("day").toDate();
+        const tzEnd = selectedDate.clone().tz(timezone).endOf("day").toDate();
+        const utcStart = moment.utc(formattedDate).startOf("day").toDate();
+        const utcEnd = moment.utc(formattedDate).endOf("day").toDate();
 
-                    $lte: new Date(
-                        `${formattedDate}T23:59:59.999Z`
-                    )
-                },
+        const startOfDay = new Date(Math.min(tzStart.getTime(), utcStart.getTime()));
+        const endOfDay = new Date(Math.max(tzEnd.getTime(), utcEnd.getTime()));
 
-                time: formattedTime,
+        /* ================= DURATION OVERLAP CALCULATION ================= */
 
-                status: {
-                    $nin: [
-                        "Cancelled",
-                        "Finished",
-                        "No-Show"
-                    ]
-                },
+        const [reqH, reqM] = formattedTime.split(":").map(Number);
+        const reqStartMin = reqH * 60 + reqM;
 
-                tableIds: {
-                    $exists: true,
-                    $ne: []
+        // Fetch active shifts for this day to find duration
+        const shortDayShift = selectedDate.format("ddd");
+        const dayMapShift = { Mon: "Mo", Tue: "Tu", Wed: "We", Thu: "Th", Fri: "Fr", Sat: "Sa", Sun: "Su" };
+        const weekdayNameShift = dayMapShift[shortDayShift] || shortDayShift;
+
+        const shifts = await Shift.find({
+            restaurantId: preference.restaurantId,
+            isActive: true,
+            $or: [
+                { type: "Recurring", daysActive: { $in: [weekdayNameShift] } },
+                { type: "Special", startDate: { $lte: endOfDay }, endDate: { $gte: startOfDay } }
+            ]
+        }).lean();
+
+        const toMinutes = t => {
+            if (!t) return 0;
+            const [h, m] = t.split(":").map(Number);
+            return h * 60 + m;
+        };
+
+        let matchedShift = shifts.find(s => {
+            const start = toMinutes(s.startTime);
+            const end = toMinutes(s.endTime);
+            if (end < start) {
+                return reqStartMin >= start || reqStartMin < end;
+            }
+            return reqStartMin >= start && reqStartMin < end;
+        });
+
+        let requestedDuration = 120; // default 2 hours
+        if (matchedShift) {
+            if (matchedShift.sameDurationForAll && matchedShift.duration) {
+                requestedDuration = matchedShift.duration;
+            } else if (!matchedShift.sameDurationForAll && matchedShift.durationByPartySize?.length) {
+                const rule = matchedShift.durationByPartySize.find(tier => {
+                    const [min, max] = tier.range.split("-").map(Number);
+                    return Number(partySize) >= min && Number(partySize) <= max;
+                });
+                if (rule?.duration) requestedDuration = rule.duration;
+                else if (matchedShift.duration) requestedDuration = matchedShift.duration;
+            }
+        }
+        const reqEndMin = reqStartMin + requestedDuration;
+
+        /* ================= COLLECT AFFECTED TABLE IDS ================= */
+
+        const allTableIdsToCheck = new Set();
+        allTables.forEach(t => {
+            allTableIdsToCheck.add(t._id.toString());
+            if (Array.isArray(t.joinedWith)) {
+                t.joinedWith.forEach(jw => allTableIdsToCheck.add(jw.toString()));
+            }
+        });
+
+        /* ================= FIND BOOKED & BLOCKED TABLES ================= */
+
+        const bookedReservations = await Reservation.find({
+            restaurantId: preference.restaurantId,
+            tableIds: { $in: Array.from(allTableIdsToCheck) },
+            date: { $gte: startOfDay, $lte: endOfDay },
+            status: {
+                $nin: [
+                    "Cancelled",
+                    "Finished",
+                    "No-Show"
+                ]
+            }
+        })
+            .populate("shiftId", "duration sameDurationForAll durationByPartySize")
+            .select("tableIds time partySize shiftId")
+            .lean();
+
+        const bookedTableIds = new Set();
+
+        for (const resv of bookedReservations) {
+            const resvTime24 = convertTo24Hour(resv.time);
+            if (!resvTime24 || !resvTime24.includes(":")) continue;
+
+            const [bH, bM] = resvTime24.split(":").map(Number);
+            const bStartMin = bH * 60 + bM;
+
+            let bDuration = 120;
+            if (resv.shiftId) {
+                if (resv.shiftId.sameDurationForAll && resv.shiftId.duration) {
+                    bDuration = resv.shiftId.duration;
+                } else if (!resv.shiftId.sameDurationForAll && resv.shiftId.durationByPartySize?.length) {
+                    const rule = resv.shiftId.durationByPartySize.find(tier => {
+                        const [min, max] = tier.range.split("-").map(Number);
+                        return (resv.partySize || 1) >= min && (resv.partySize || 1) <= max;
+                    });
+                    if (rule?.duration) bDuration = rule.duration;
+                    else if (resv.shiftId.duration) bDuration = resv.shiftId.duration;
                 }
+            }
+            const bEndMin = bStartMin + bDuration;
 
-            })
-                .select("tableIds")
-                .lean();
+            // Overlap condition: reqStartMin < bEndMin && bStartMin < reqEndMin
+            if (reqStartMin < bEndMin && bStartMin < reqEndMin) {
+                if (Array.isArray(resv.tableIds)) {
+                    resv.tableIds.forEach(tId => bookedTableIds.add(tId.toString()));
+                }
+            }
+        }
 
-        /* ================= EXTRACT BOOKED TABLE IDS ================= */
+        // Active temporary holds
+        const activeHolds = await ReservationHold.find({
+            restaurantId: preference.restaurantId,
+            tableIds: { $in: Array.from(allTableIdsToCheck) },
+            date: formattedDate,
+            time: formattedTime,
+            expiresAt: { $gt: new Date() }
+        }).select("tableIds").lean();
 
-        const bookedTableIds = [
-            ...new Set(
-                bookedReservations.flatMap(
-                    (reservation) =>
-                        (reservation.tableIds || []).map(
-                            (id) =>
-                                id.toString()
-                        )
-                )
-            )
-        ];
+        activeHolds.forEach(h => {
+            if (Array.isArray(h.tableIds)) {
+                h.tableIds.forEach(tId => bookedTableIds.add(tId.toString()));
+            }
+        });
+
+        // Table blocks
+        const blocks = await Block.find({
+            restaurantId: preference.restaurantId,
+            status: "Active",
+            isExpired: false,
+            startDate: { $lte: endOfDay },
+            endDate: { $gte: startOfDay }
+        }).lean();
+
+        for (const block of blocks) {
+            if (block.isFullRestaurantBlock) {
+                if (block.startTime && block.endTime) {
+                    const bStart = toMinutes(convertTo24Hour(block.startTime));
+                    const bEnd = toMinutes(convertTo24Hour(block.endTime));
+                    if (reqStartMin < bEnd && bStart < reqEndMin) {
+                        allTables.forEach(t => bookedTableIds.add(t._id.toString()));
+                    }
+                } else {
+                    allTables.forEach(t => bookedTableIds.add(t._id.toString()));
+                }
+            } else if (Array.isArray(block.tableIds) && block.tableIds.length) {
+                if (block.startTime && block.endTime) {
+                    const bStart = toMinutes(convertTo24Hour(block.startTime));
+                    const bEnd = toMinutes(convertTo24Hour(block.endTime));
+                    if (reqStartMin < bEnd && bStart < reqEndMin) {
+                        block.tableIds.forEach(id => bookedTableIds.add(id.toString()));
+                    }
+                } else {
+                    block.tableIds.forEach(id => bookedTableIds.add(id.toString()));
+                }
+            }
+        }
 
         /* ================= FILTER AVAILABLE TABLES ================= */
 
-        const availableTables =
-            allTables.filter(
-                (table) =>
-                    !bookedTableIds.includes(
-                        table._id.toString()
-                    )
-            );
+        const availableTables = allTables.filter(table => {
+            const tableIdStr = table._id.toString();
+            // 1. Table itself is booked or blocked
+            if (bookedTableIds.has(tableIdStr)) return false;
+
+            // 2. Any merged/joined table is booked or blocked
+            if (Array.isArray(table.joinedWith) && table.joinedWith.length) {
+                const isAnyJoinedBooked = table.joinedWith.some(jwId =>
+                    bookedTableIds.has(jwId.toString())
+                );
+                if (isAnyJoinedBooked) return false;
+            }
+
+            return true;
+        });
 
         /* ================= RESPONSE ================= */
 
+        const formattedAvailableTables = availableTables.map(table => ({
+            _id: table._id,
+            tableNumber: table.tableNumber,
+            displayName: table.displayName,
+            capacity: table.capacity,
+            shape: table.shape,
+            status: table.status,
+            roomId: table.roomId?._id || table.roomId || null,
+            roomName: table.roomId?.name || null
+        }));
+
         return res.status(200).json({
             success: true,
-
-            message:
-                "Available tables fetched successfully",
-
+            message: "Available tables fetched successfully",
             selectedDate: formattedDate,
-
             selectedTime: formattedTime,
-
-            requestedPartySize:
-                Number(partySize),
-
-            totalTables:
-                allTables.length,
-
-            bookedTables:
-                bookedTableIds.length,
-
-            availableCount:
-                availableTables.length,
-
-            data: availableTables
+            requestedPartySize: Number(partySize),
+            totalTables: allTables.length,
+            bookedTables: bookedTableIds.size,
+            availableCount: formattedAvailableTables.length,
+            data: formattedAvailableTables
         });
 
     } catch (error) {
